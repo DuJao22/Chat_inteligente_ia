@@ -138,8 +138,9 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row h-[100dvh] overflow-hidden">
-      <div className="md:hidden flex items-center justify-between p-4 bg-white border-b border-gray-100 z-30">
+    <div className="flex flex-col md:flex-row h-[100dvh] w-full overflow-hidden bg-slate-50">
+      {/* Mobile Header */}
+      <div className="md:hidden flex items-center justify-between p-4 bg-white border-b border-gray-100 z-30 shrink-0">
         <div className="flex items-center gap-2">
           <Rocket className="w-6 h-6 text-blue-600" />
           <span className="font-bold text-gray-900 tracking-tight text-lg">Dgital Soluctions</span>
@@ -152,6 +153,7 @@ const App: React.FC = () => {
         </button>
       </div>
 
+      {/* Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 md:hidden animate-in fade-in duration-200"
@@ -159,10 +161,11 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* Sidebar Navigation */}
       <aside className={`
         fixed inset-y-0 left-0 w-80 bg-white border-r border-gray-200 flex flex-col z-50 transition-transform duration-300 ease-in-out
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:relative md:translate-x-0
+        md:relative md:translate-x-0 shrink-0
       `}>
         <div className="hidden md:flex p-6 border-b border-gray-100 items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-lg">
@@ -225,17 +228,21 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="p-4 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-500 font-medium flex items-center gap-2">
+        <div className="p-4 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-500 font-medium flex items-center gap-2 shrink-0">
           <div className="w-2 h-2 bg-green-500 rounded-full"></div>
           SQL Cloud: Online
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col relative bg-white overflow-hidden h-full">
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col min-w-0 bg-white relative">
         {view === 'admin' && admin.isAuthenticated ? (
-          <AdminDashboard />
+          <div className="h-full overflow-hidden">
+            <AdminDashboard />
+          </div>
         ) : (
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col h-full w-full">
+            {/* Desktop Header */}
             <header className="hidden md:flex bg-white border-b border-gray-100 p-4 items-center justify-between shadow-sm z-10 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100">
@@ -251,9 +258,10 @@ const App: React.FC = () => {
               </div>
             </header>
 
+            {/* Chat Messages Area */}
             <div 
               ref={scrollRef} 
-              className="flex-1 overflow-y-auto p-4 md:p-10 space-y-6 scroll-smooth bg-slate-50/50"
+              className="flex-1 overflow-y-auto p-4 md:p-10 space-y-4 md:space-y-6 scroll-smooth bg-slate-50/50"
             >
               {chatState.messages.map(msg => (
                 <ChatMessage key={msg.id} message={msg} />
@@ -271,20 +279,21 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <div className="p-4 md:p-6 bg-white border-t border-gray-100 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] shrink-0">
+            {/* Chat Input Area */}
+            <div className="p-4 md:p-6 bg-white border-t border-gray-100 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex items-center gap-2 md:gap-3">
                 <input 
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Conte-me sobre o seu desafio de negócio..."
-                  className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl py-3.5 px-5 md:py-4 md:px-6 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner"
+                  placeholder="Conte-me sobre seu desafio..."
+                  className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl py-3 px-4 md:py-4 md:px-6 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner"
                   disabled={chatState.isThinking}
                 />
                 <button 
                   type="submit"
                   disabled={!input.trim() || chatState.isThinking}
-                  className="bg-blue-600 text-white p-3.5 md:p-4 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 disabled:opacity-50"
+                  className="bg-blue-600 text-white p-3 md:p-4 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 disabled:opacity-50"
                 >
                   <Send className="w-5 h-5 md:w-6 md:h-6" />
                 </button>
