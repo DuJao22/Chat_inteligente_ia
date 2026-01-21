@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Message } from "../types";
 
@@ -25,13 +26,15 @@ REGRAS:
 Mantenha as respostas curtas e jamais mostre o JSON para o cliente.
 `;
 
+/**
+ * getGeminiChat - Dgital Soluctions
+ * Creates a new chat session with the growth consultant.
+ * Following guidelines: obtained exclusively from process.env.API_KEY and using new GoogleGenAI({apiKey}).
+ */
 export const getGeminiChat = (history: Message[] = []) => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API_KEY_MISSING");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  // Always use process.env.API_KEY directly for initialization
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
     config: {
@@ -45,6 +48,9 @@ export const getGeminiChat = (history: Message[] = []) => {
   });
 };
 
+/**
+ * parseAnalysis - Extracts the hidden JSON analysis from the model response.
+ */
 export const parseAnalysis = (text: string) => {
   const match = text.match(/<analysis>([\s\S]*?)<\/analysis>/);
   if (match) {

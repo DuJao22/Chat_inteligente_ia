@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { FunnelStage, LeadStatus, Message, ChatState, Lead, AdminUser } from './types';
 import { getGeminiChat, parseAnalysis } from './services/geminiService';
@@ -5,13 +6,14 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Bot, Rocket, Sparkles, LayoutDashboard, MessageCircle, LogOut, ShieldCheck, Menu, X, AlertTriangle } from 'lucide-react';
+import { Send, Bot, Rocket, LayoutDashboard, MessageCircle, Menu, X, AlertTriangle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
   const [admin, setAdmin] = useState<AdminUser>({ isAuthenticated: false, username: null });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Guideline: The API key must be obtained exclusively from process.env.API_KEY
   const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   
   const [leadId] = useState<string>(() => `lead_${Math.random().toString(36).substr(2, 9)}`);
@@ -53,8 +55,8 @@ const App: React.FC = () => {
       ...prev,
       messages: newMessages,
       isThinking: false,
-      currentStage: analysis?.stage || prev.currentStage,
-      leadStatus: analysis?.status || prev.leadStatus,
+      currentStage: (analysis?.stage as FunnelStage) || prev.currentStage,
+      leadStatus: (analysis?.status as LeadStatus) || prev.leadStatus,
     }));
     await persistLeadData(newMessages, analysis);
   };
@@ -92,9 +94,13 @@ const App: React.FC = () => {
     e?.preventDefault();
     if (!input.trim() || chatState.isThinking) return;
 
-    if (!process.env.API_KEY) {
+    // Guideline: Exclusively use process.env.API_KEY
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
       setHasApiKey(false);
       return;
+    } else {
+      setHasApiKey(true);
     }
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', text: input, timestamp: new Date() };
@@ -110,9 +116,7 @@ const App: React.FC = () => {
       handleBotResponse(responseText);
     } catch (err: any) {
       console.error("Chat Error:", err);
-      const errorMsg = err.message === 'API_KEY_MISSING' 
-        ? "Erro: Chave de API não configurada no ambiente." 
-        : "Desculpe, tive um problema na conexão. Pode tentar novamente?";
+      const errorMsg = `Erro de conexão: ${err.message || "Problema desconhecido"}.`;
       
       setChatState(prev => ({ 
         ...prev, 
@@ -171,7 +175,7 @@ const App: React.FC = () => {
               {!hasApiKey && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm mb-4">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <span>Configure a variável <b>API_KEY</b> no Render para ativar as respostas da IA.</span>
+                  <span>Configure a variável <b>API_KEY</b> no ambiente para ativar as respostas da IA.</span>
                 </div>
               )}
               {chatState.messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
