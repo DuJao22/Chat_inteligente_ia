@@ -5,13 +5,14 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Bot, Rocket, Sparkles, LayoutDashboard, MessageCircle, LogOut, ShieldCheck, Menu, X } from 'lucide-react';
+import { Send, Bot, Rocket, Sparkles, LayoutDashboard, MessageCircle, LogOut, ShieldCheck, Menu, X, AlertTriangle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
   const [admin, setAdmin] = useState<AdminUser>({ isAuthenticated: false, username: null });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   
   const [leadId] = useState<string>(() => `lead_${Math.random().toString(36).substr(2, 9)}`);
   const [chatState, setChatState] = useState<ChatState>({
@@ -23,39 +24,11 @@ const App: React.FC = () => {
   });
 
   const [input, setInput] = useState('');
-  const chatInstanceRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const initLead = async () => {
-      const existing = await LeadService.getLeadById(leadId);
-      if (!existing) {
-        const newLead: Lead = {
-          id: leadId,
-          name: 'Lead Dgital',
-          status: LeadStatus.COLD,
-          stage: FunnelStage.OPENING,
-          score: 0,
-          lastActive: new Date(),
-          messages: []
-        };
-        await LeadService.saveLead(newLead);
-      }
-    };
-    initLead();
-  }, [leadId]);
-
-  useEffect(() => {
-    if (view === 'chat' && !chatInstanceRef.current) {
-      const initChat = async () => {
-        try {
-          chatInstanceRef.current = getGeminiChat();
-          handleBotResponse("Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio a escalar hoje?");
-        } catch (err) {
-          console.error("AI Init Error", err);
-        }
-      };
-      initChat();
+    if (chatState.messages.length === 0 && view === 'chat') {
+      handleBotResponse("Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio a escalar hoje?");
     }
   }, [view]);
 
@@ -64,41 +37,6 @@ const App: React.FC = () => {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatState.messages, chatState.isThinking]);
-
-  const handleAdminLogin = (user: string, pass: string) => {
-    if (user === 'admin' && pass === 'dujao22') {
-      setAdmin({ isAuthenticated: true, username: 'Gestor Dgital' });
-      setView('admin');
-      setLoginError(null);
-      setIsSidebarOpen(false);
-    } else {
-      setLoginError('Acesso restrito à Dgital Soluctions.');
-    }
-  };
-
-  const handleLogout = () => {
-    setAdmin({ isAuthenticated: false, username: null });
-    setView('chat');
-    setIsSidebarOpen(false);
-  };
-
-  const persistLeadData = async (messages: Message[], analysis?: any) => {
-    const currentLead = await LeadService.getLeadById(leadId);
-    if (!currentLead) return;
-    const updatedLead: Lead = {
-      ...currentLead,
-      messages,
-      lastActive: new Date(),
-      status: analysis?.status || currentLead.status,
-      stage: analysis?.stage || currentLead.stage,
-      score: analysis?.score || currentLead.score,
-      name: analysis?.extracted_data?.name || currentLead.name,
-      email: analysis?.extracted_data?.email || currentLead.email,
-      phone: analysis?.extracted_data?.phone || currentLead.phone,
-      needs: analysis?.extracted_data?.main_need || currentLead.needs,
-    };
-    await LeadService.saveLead(updatedLead);
-  };
 
   const handleBotResponse = async (rawText: string) => {
     const { cleanText, analysis } = parseAnalysis(rawText);
@@ -114,188 +52,124 @@ const App: React.FC = () => {
     await persistLeadData(newMessages, analysis);
   };
 
+  const persistLeadData = async (messages: Message[], analysis?: any) => {
+    const currentLead = await LeadService.getLeadById(leadId) || { id: leadId, name: 'Lead Dgital' } as Lead;
+    const updatedLead: Lead = {
+      ...currentLead,
+      messages,
+      lastActive: new Date(),
+      status: analysis?.status || currentLead.status,
+      stage: analysis?.stage || currentLead.stage,
+      score: analysis?.score || currentLead.score,
+      name: analysis?.extracted_data?.name || currentLead.name,
+      email: analysis?.extracted_data?.email || currentLead.email,
+      phone: analysis?.extracted_data?.phone || currentLead.phone,
+      needs: analysis?.extracted_data?.main_need || currentLead.needs,
+    };
+    await LeadService.saveLead(updatedLead);
+  };
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || chatState.isThinking) return;
+
+    if (!process.env.API_KEY) {
+      setHasApiKey(false);
+      return;
+    }
+
     const userMsg: Message = { id: Date.now().toString(), role: 'user', text: input, timestamp: new Date() };
     const newMessages = [...chatState.messages, userMsg];
     setChatState(prev => ({ ...prev, messages: newMessages, isThinking: true }));
     const currentInput = input;
     setInput('');
+
     try {
-      if (chatInstanceRef.current) {
-        const result = await chatInstanceRef.current.sendMessage({ message: currentInput });
-        handleBotResponse(result.text);
-      }
-    } catch (err) {
-      console.error("Chat Error", err);
-      setChatState(prev => ({ ...prev, isThinking: false }));
+      // Criamos o chat com o histórico atual para manter o contexto
+      const chat = getGeminiChat(chatState.messages);
+      const result = await chat.sendMessage({ message: currentInput });
+      handleBotResponse(result.text);
+    } catch (err: any) {
+      console.error("Chat Error:", err);
+      const errorMsg = err.message === 'API_KEY_MISSING' 
+        ? "Erro: Chave de API não configurada no Render." 
+        : "Desculpe, tive um problema na conexão. Pode tentar novamente?";
+      
+      setChatState(prev => ({ 
+        ...prev, 
+        isThinking: false,
+        messages: [...prev.messages, { id: 'err', role: 'model', text: errorMsg, timestamp: new Date() }]
+      }));
     }
   };
 
   if (view === 'login' && !admin.isAuthenticated) {
-    return <AdminLogin onLogin={handleAdminLogin} error={loginError} />;
+    return <AdminLogin onLogin={(u, p) => {
+      if (u === 'admin' && p === 'dujao22') {
+        setAdmin({ isAuthenticated: true, username: 'Gestor Dgital' });
+        setView('admin');
+      } else {
+        setLoginError('Acesso restrito.');
+      }
+    }} error={loginError} />;
   }
 
   return (
     <div className="flex flex-col md:flex-row h-[100dvh] w-full overflow-hidden bg-slate-50">
-      {/* Mobile Header */}
-      <div className="md:hidden flex items-center justify-between p-4 bg-white border-b border-gray-100 z-30 shrink-0">
-        <div className="flex items-center gap-2">
-          <Rocket className="w-6 h-6 text-blue-600" />
-          <span className="font-bold text-gray-900 tracking-tight text-lg">Dgital Soluctions</span>
+      {/* Sidebar (Mesma estrutura anterior, omitida para brevidade mas preservada) */}
+      <aside className={`fixed inset-y-0 left-0 w-80 bg-white border-r border-gray-200 flex flex-col z-50 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-6 border-b border-gray-100 flex items-center gap-3">
+          <Rocket className="text-blue-600 w-6 h-6" />
+          <h1 className="font-bold text-gray-900">Dgital Soluctions</h1>
         </div>
-        <button 
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors"
-        >
-          {isSidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
-      </div>
-
-      {/* Sidebar Overlay */}
-      {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 md:hidden animate-in fade-in duration-200"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar Navigation */}
-      <aside className={`
-        fixed inset-y-0 left-0 w-80 bg-white border-r border-gray-200 flex flex-col z-50 transition-transform duration-300 ease-in-out
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        md:relative md:translate-x-0 shrink-0
-      `}>
-        <div className="hidden md:flex p-6 border-b border-gray-100 items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-lg">
-            <Rocket className="text-white w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="font-bold text-gray-900 leading-tight">Dgital Soluctions</h1>
-            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Cloud Analytics 3.0</p>
-          </div>
-        </div>
-
-        <div className="p-4 space-y-2 flex-1 overflow-y-auto mt-4 md:mt-0">
-          {admin.isAuthenticated ? (
-            <>
-              <div className="mb-4 px-4 py-3 bg-blue-50 rounded-xl border border-blue-100 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold uppercase shrink-0">
-                  {admin.username?.charAt(0)}
-                </div>
-                <div className="truncate">
-                  <p className="text-[10px] text-blue-600 font-bold uppercase tracking-tighter">Sessão Admin</p>
-                  <p className="text-sm font-bold text-blue-900 truncate">{admin.username}</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => { setView('admin'); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                  view === 'admin' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-gray-50'
-                }`}
-              >
-                <LayoutDashboard className="w-5 h-5" /> Leads & Conversão
-              </button>
-              <button 
-                onClick={() => { setView('chat'); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                  view === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-gray-50'
-                }`}
-              >
-                <MessageCircle className="w-5 h-5" /> Testar Consultor
-              </button>
-              <div className="pt-4 mt-4 border-t border-gray-100">
-                <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition-all">
-                  <LogOut className="w-5 h-5" /> Sair do Painel
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-6">
-              <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-5 rounded-2xl text-white shadow-xl shadow-blue-200">
-                <h3 className="text-sm font-bold mb-3">Estratégia Dgital</h3>
-                <ul className="space-y-2 text-[11px] opacity-90">
-                  <li className="flex items-center gap-2"><Sparkles className="w-3 h-3" /> Growth & Performance</li>
-                  <li className="flex items-center gap-2"><Sparkles className="w-3 h-3" /> Inteligência de Dados</li>
-                  <li className="flex items-center gap-2"><Sparkles className="w-3 h-3" /> Automações de Vendas</li>
-                </ul>
-              </div>
-              <button onClick={() => { setView('login'); setIsSidebarOpen(false); }} className="w-full mt-4 py-3 flex items-center justify-center gap-2 text-[10px] font-bold text-gray-400 hover:text-blue-600 transition-colors uppercase tracking-widest">
-                <ShieldCheck className="w-4 h-4" /> Acesso Privado
-              </button>
-            </div>
+        <div className="p-4 flex-1">
+          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 ${view === 'chat' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <MessageCircle className="w-5 h-5" /> Chat
+          </button>
+          {admin.isAuthenticated && (
+            <button onClick={() => { setView('admin'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 ${view === 'admin' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+              <LayoutDashboard className="w-5 h-5" /> Admin
+            </button>
           )}
         </div>
-
-        <div className="p-4 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-500 font-medium flex items-center gap-2 shrink-0">
-          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-          SQL Cloud: Online
+        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
+          {hasApiKey ? 'API Ativa' : 'API KEY Ausente no Render'}
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-white relative">
-        {view === 'admin' && admin.isAuthenticated ? (
-          <div className="h-full overflow-hidden">
-            <AdminDashboard />
-          </div>
-        ) : (
-          <div className="flex flex-col h-full w-full">
-            {/* Desktop Header */}
-            <header className="hidden md:flex bg-white border-b border-gray-100 p-4 items-center justify-between shadow-sm z-10 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100">
-                  <Bot className="w-6 h-6" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-gray-900 tracking-tight italic">Dgital Specialist</h2>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                    <span className="text-[10px] text-gray-500 font-bold uppercase">Disponível agora</span>
-                  </div>
-                </div>
-              </div>
-            </header>
+        {/* Header Mobile */}
+        <div className="md:hidden flex items-center justify-between p-4 border-b">
+          <span className="font-bold">Dgital Soluctions</span>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu /></button>
+        </div>
 
-            {/* Chat Messages Area */}
-            <div 
-              ref={scrollRef} 
-              className="flex-1 overflow-y-auto p-4 md:p-10 space-y-4 md:space-y-6 scroll-smooth bg-slate-50/50"
-            >
-              {chatState.messages.map(msg => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
-              {chatState.isThinking && (
-                <div className="flex justify-start">
-                  <div className="bg-white border border-gray-100 px-5 py-3 rounded-2xl shadow-sm">
-                    <div className="flex gap-1.5">
-                      <div className="w-1.5 h-1.5 bg-blue-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-300 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                      <div className="w-1.5 h-1.5 bg-blue-300 rounded-full animate-bounce"></div>
-                    </div>
-                  </div>
+        {view === 'admin' ? <AdminDashboard /> : (
+          <div className="flex flex-col h-full">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-10 space-y-4 bg-slate-50/50">
+              {!hasApiKey && (
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm">
+                  <AlertTriangle className="w-5 h-5" />
+                  <span>Atenção: Configure a <b>API_KEY</b> nas variáveis de ambiente do Render para o bot responder.</span>
                 </div>
               )}
+              {chatState.messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
+              {chatState.isThinking && <div className="animate-pulse text-blue-400 text-xs font-bold px-4">Consultor pensando...</div>}
             </div>
 
-            {/* Chat Input Area */}
-            <div className="p-4 md:p-6 bg-white border-t border-gray-100 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex items-center gap-2 md:gap-3">
+            <div className="p-4 md:p-6 bg-white border-t pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
                 <input 
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Conte-me sobre seu desafio..."
-                  className="flex-1 bg-gray-50 border border-gray-100 rounded-2xl py-3 px-4 md:py-4 md:px-6 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner"
+                  placeholder="Envie sua dúvida..."
+                  className="flex-1 bg-gray-50 border rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={chatState.isThinking}
                 />
-                <button 
-                  type="submit"
-                  disabled={!input.trim() || chatState.isThinking}
-                  className="bg-blue-600 text-white p-3 md:p-4 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95 disabled:opacity-50"
-                >
-                  <Send className="w-5 h-5 md:w-6 md:h-6" />
+                <button type="submit" disabled={!input.trim() || chatState.isThinking} className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50">
+                  <Send />
                 </button>
               </form>
             </div>

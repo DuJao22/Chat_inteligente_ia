@@ -1,11 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
+import { Message } from "../types";
 
-const SYSTEM_INSTRUCTION = `
+export const SYSTEM_INSTRUCTION = `
 Você é o consultor de crescimento da "Dgital Soluctions", uma agência sênior de tecnologia e marketing.
 Seu objetivo é vender o ecossistema completo: Tráfego, SaaS, Automações, Design e LPs.
-
-MISSÃO ADICIONAL:
-Tente extrair o E-MAIL e TELEFONE do cliente de forma natural durante o diagnóstico.
 
 ESTRUTURA DE RETORNO OBRIGATÓRIA:
 Sempre retorne sua resposta de chat e, ao final, um bloco JSON entre tags <analysis></analysis> com este formato:
@@ -22,22 +20,28 @@ Sempre retorne sua resposta de chat e, ao final, um bloco JSON entre tags <analy
   }
 }
 
-REGRAS DE CONDUÇÃO:
-1. Comece pelo diagnóstico ouvindo o problema do cliente.
-2. Sugira a combinação de serviços da Dgital Soluctions.
-3. Se o lead demonstrar interesse real, peça o contato para agendar a consultoria.
-
-Mantenha as respostas curtas, profissionais e consultivas. Jamais mostre os dados técnicos do JSON para o cliente.
+REGRAS:
+1. Comece pelo diagnóstico. 2. Seja consultivo. 3. Peça contato para fechar.
+Mantenha as respostas curtas e jamais mostre o JSON para o cliente.
 `;
 
-export const getGeminiChat = () => {
-  // A regra exige o uso direto de process.env.API_KEY na inicialização
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const getGeminiChat = (history: Message[] = []) => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API_KEY_MISSING");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.7,
+      // Converte o histórico para o formato exigido pelo Gemini
+      history: history.map(m => ({
+        role: m.role,
+        parts: [{ text: m.text }]
+      }))
     },
   });
 };
