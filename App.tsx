@@ -106,7 +106,8 @@ const App: React.FC = () => {
     try {
       const chat = getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: currentInput });
-      handleBotResponse(result.text);
+      const responseText = result.text || "Desculpe, tive um erro ao processar sua mensagem.";
+      handleBotResponse(responseText);
     } catch (err: any) {
       console.error("Chat Error:", err);
       const errorMsg = err.message === 'API_KEY_MISSING' 
@@ -139,15 +140,15 @@ const App: React.FC = () => {
           <Rocket className="text-blue-600 w-6 h-6" />
           <h1 className="font-bold text-gray-900">Dgital Soluctions</h1>
         </div>
-        <div className="p-4 flex-1">
-          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+        <div className="p-4 flex-1 overflow-y-auto">
+          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
             <MessageCircle className="w-5 h-5" /> Chat do Consultor
           </button>
-          <button onClick={() => { setView('login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
             <LayoutDashboard className="w-5 h-5" /> Painel CRM
           </button>
         </div>
-        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center gap-2">
+        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center gap-2 shrink-0">
           <div className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
           {hasApiKey ? 'IA Operacional' : 'API Key Pendente'}
         </div>

@@ -1,7 +1,7 @@
 import { Lead, Message } from '../types';
 
 // O URL agora é obtido exclusivamente via variável de ambiente para segurança.
-const SQLITE_CLOUD_URL = process.env.SQLITE_CLOUD_URL;
+const SQLITE_CLOUD_URL = process.env.SQLITE_CLOUD_URL || '';
 
 /**
  * LeadService - Dgital Soluctions
@@ -45,14 +45,18 @@ export const LeadService = {
   },
 
   getAllLeads: async (): Promise<Lead[]> => {
-    const data = localStorage.getItem('dgital_db_leads');
-    const leads: Lead[] = data ? JSON.parse(data) : [];
-    const messages = await LeadService.getRawMessages();
-    
-    return leads.map(l => ({
-      ...l,
-      messages: messages.filter((m: any) => m.lead_id === l.id)
-    }));
+    try {
+      const data = localStorage.getItem('dgital_db_leads');
+      const leads: Lead[] = data ? JSON.parse(data) : [];
+      const messages = await LeadService.getRawMessages();
+      
+      return leads.map(l => ({
+        ...l,
+        messages: messages.filter((m: any) => m.lead_id === l.id)
+      }));
+    } catch (e) {
+      return [];
+    }
   },
 
   getLeadById: async (id: string): Promise<Lead | undefined> => {
@@ -69,7 +73,11 @@ export const LeadService = {
   },
 
   getRawMessages: async (): Promise<any[]> => {
-    const data = localStorage.getItem('dgital_db_messages');
-    return data ? JSON.parse(data) : [];
+    try {
+      const data = localStorage.getItem('dgital_db_messages');
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
   }
 };
