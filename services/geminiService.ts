@@ -37,12 +37,11 @@ export const getGeminiChat = (history: Message[] = []) => {
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.7,
-      // Converte o histórico para o formato exigido pelo Gemini
-      history: history.map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
-      }))
     },
+    history: history.map(m => ({
+      role: m.role,
+      parts: [{ text: m.text }]
+    }))
   });
 };
 

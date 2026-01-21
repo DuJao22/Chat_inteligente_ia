@@ -28,9 +28,16 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (chatState.messages.length === 0 && view === 'chat') {
-      handleBotResponse("Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio a escalar hoje?");
+      handleBotInitialGreeting();
     }
   }, [view]);
+
+  const handleBotInitialGreeting = async () => {
+    const text = "Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio a escalar hoje?";
+    const botMsg: Message = { id: Date.now().toString(), role: 'model', text, timestamp: new Date() };
+    setChatState(prev => ({ ...prev, messages: [botMsg] }));
+    await persistLeadData([botMsg]);
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -53,19 +60,31 @@ const App: React.FC = () => {
   };
 
   const persistLeadData = async (messages: Message[], analysis?: any) => {
-    const currentLead = await LeadService.getLeadById(leadId) || { id: leadId, name: 'Lead Dgital' } as Lead;
+    const existing = await LeadService.getLeadById(leadId);
+    
+    const baseLead: Lead = existing || {
+      id: leadId,
+      name: 'Lead Dgital',
+      status: LeadStatus.COLD,
+      stage: FunnelStage.OPENING,
+      score: 0,
+      lastActive: new Date(),
+      messages: []
+    };
+
     const updatedLead: Lead = {
-      ...currentLead,
+      ...baseLead,
       messages,
       lastActive: new Date(),
-      status: analysis?.status || currentLead.status,
-      stage: analysis?.stage || currentLead.stage,
-      score: analysis?.score || currentLead.score,
-      name: analysis?.extracted_data?.name || currentLead.name,
-      email: analysis?.extracted_data?.email || currentLead.email,
-      phone: analysis?.extracted_data?.phone || currentLead.phone,
-      needs: analysis?.extracted_data?.main_need || currentLead.needs,
+      status: analysis?.status || baseLead.status,
+      stage: analysis?.stage || baseLead.stage,
+      score: analysis?.score || baseLead.score,
+      name: analysis?.extracted_data?.name || baseLead.name,
+      email: analysis?.extracted_data?.email || baseLead.email,
+      phone: analysis?.extracted_data?.phone || baseLead.phone,
+      needs: analysis?.extracted_data?.main_need || baseLead.needs,
     };
+    
     await LeadService.saveLead(updatedLead);
   };
 
@@ -85,20 +104,19 @@ const App: React.FC = () => {
     setInput('');
 
     try {
-      // Criamos o chat com o histórico atual para manter o contexto
       const chat = getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: currentInput });
       handleBotResponse(result.text);
     } catch (err: any) {
       console.error("Chat Error:", err);
       const errorMsg = err.message === 'API_KEY_MISSING' 
-        ? "Erro: Chave de API não configurada no Render." 
+        ? "Erro: Chave de API não configurada no ambiente." 
         : "Desculpe, tive um problema na conexão. Pode tentar novamente?";
       
       setChatState(prev => ({ 
         ...prev, 
         isThinking: false,
-        messages: [...prev.messages, { id: 'err', role: 'model', text: errorMsg, timestamp: new Date() }]
+        messages: [...prev.messages, { id: 'err-' + Date.now(), role: 'model', text: errorMsg, timestamp: new Date() }]
       }));
     }
   };
@@ -116,60 +134,70 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col md:flex-row h-[100dvh] w-full overflow-hidden bg-slate-50">
-      {/* Sidebar (Mesma estrutura anterior, omitida para brevidade mas preservada) */}
       <aside className={`fixed inset-y-0 left-0 w-80 bg-white border-r border-gray-200 flex flex-col z-50 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 border-b border-gray-100 flex items-center gap-3">
           <Rocket className="text-blue-600 w-6 h-6" />
           <h1 className="font-bold text-gray-900">Dgital Soluctions</h1>
         </div>
         <div className="p-4 flex-1">
-          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 ${view === 'chat' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <MessageCircle className="w-5 h-5" /> Chat
+          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <MessageCircle className="w-5 h-5" /> Chat do Consultor
           </button>
-          {admin.isAuthenticated && (
-            <button onClick={() => { setView('admin'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 ${view === 'admin' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
-              <LayoutDashboard className="w-5 h-5" /> Admin
-            </button>
-          )}
+          <button onClick={() => { setView('login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <LayoutDashboard className="w-5 h-5" /> Painel CRM
+          </button>
         </div>
         <div className="p-4 border-t text-[10px] text-gray-400 flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
-          {hasApiKey ? 'API Ativa' : 'API KEY Ausente no Render'}
+          {hasApiKey ? 'IA Operacional' : 'API Key Pendente'}
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-white relative">
-        {/* Header Mobile */}
-        <div className="md:hidden flex items-center justify-between p-4 border-b">
-          <span className="font-bold">Dgital Soluctions</span>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu /></button>
+      <main className="flex-1 flex flex-col min-w-0 bg-white relative h-full">
+        <div className="md:hidden flex items-center justify-between p-4 border-b bg-white shrink-0">
+          <div className="flex items-center gap-2">
+            <Rocket className="text-blue-600 w-5 h-5" />
+            <span className="font-bold text-gray-900">Dgital</span>
+          </div>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2">
+            {isSidebarOpen ? <X /> : <Menu />}
+          </button>
         </div>
 
-        {view === 'admin' ? <AdminDashboard /> : (
-          <div className="flex flex-col h-full">
+        {view === 'admin' && admin.isAuthenticated ? <AdminDashboard /> : (
+          <div className="flex flex-col h-full overflow-hidden">
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-10 space-y-4 bg-slate-50/50">
               {!hasApiKey && (
-                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm">
-                  <AlertTriangle className="w-5 h-5" />
-                  <span>Atenção: Configure a <b>API_KEY</b> nas variáveis de ambiente do Render para o bot responder.</span>
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm mb-4">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <span>Configure a variável <b>API_KEY</b> no Render para ativar as respostas da IA.</span>
                 </div>
               )}
               {chatState.messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
-              {chatState.isThinking && <div className="animate-pulse text-blue-400 text-xs font-bold px-4">Consultor pensando...</div>}
+              {chatState.isThinking && (
+                <div className="flex gap-2 items-center text-blue-400 text-xs font-bold px-4 animate-pulse">
+                  <Bot className="w-4 h-4" />
+                  <span>Consultor analisando...</span>
+                </div>
+              )}
             </div>
 
-            <div className="p-4 md:p-6 bg-white border-t pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="p-4 md:p-6 bg-white border-t shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
                 <input 
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Envie sua dúvida..."
-                  className="flex-1 bg-gray-50 border rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Como podemos escalar seu negócio?"
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
                   disabled={chatState.isThinking}
                 />
-                <button type="submit" disabled={!input.trim() || chatState.isThinking} className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50">
-                  <Send />
+                <button 
+                  type="submit" 
+                  disabled={!input.trim() || chatState.isThinking} 
+                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100"
+                >
+                  <Send className="w-5 h-5" />
                 </button>
               </form>
             </div>
