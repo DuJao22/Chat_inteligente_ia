@@ -1,26 +1,21 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Message } from "../types";
 
+// Agente Dgital Soluctions - Prompt do Sistema
 export const SYSTEM_INSTRUCTION = `Agente Dgital Soluctions. Venda: Tráfego, Automação, SaaS e LP.
 Seja direto e consultivo. 
 Obrigatório: Resposta + <analysis>{"stage":"...","status":"...","score":0,"next_step":"...","extracted_data":{}}</analysis>`;
 
 /**
  * getGeminiChat - Dgital Soluctions
- * Sempre utiliza a chave mais recente disponível em process.env.API_KEY
+ * Inicializa o chat utilizando exclusivamente a chave da variável de ambiente.
  */
 export const getGeminiChat = (history: Message[] = []) => {
-  // A chave é injetada automaticamente após window.aistudio.openSelectKey()
-  // No Render, se o admin não vinculou uma chave própria, usa a do ambiente VITE_API_KEY
-  const apiKey = process.env.API_KEY || (window as any).VITE_API_KEY;
+  // O SDK deve ser inicializado com process.env.API_KEY conforme diretrizes
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  if (!apiKey) {
-    throw new Error('API_KEY_MISSING');
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-  
-  // Otimização extrema: Máximo de 3 mensagens de histórico para economizar tokens
+  // Otimização de histórico para manter o contexto relevante
   const optimizedHistory = history.slice(-3);
 
   return ai.chats.create({
@@ -37,6 +32,9 @@ export const getGeminiChat = (history: Message[] = []) => {
   });
 };
 
+/**
+ * parseAnalysis - Extrai os metadados JSON da resposta da IA
+ */
 export const parseAnalysis = (text: string) => {
   const match = text.match(/<analysis>([\s\S]*?)<\/analysis>/);
   if (match) {

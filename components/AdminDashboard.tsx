@@ -1,30 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { LeadService } from '../services/dbService';
-import { Lead, LeadStatus, Message } from '../types';
-import { GoogleGenAI } from "@google/genai";
+import { Lead, LeadStatus } from '../types';
 import { 
-  Users, Target, Zap, Phone, Mail, 
-  Search, Trash2, ExternalLink,
-  Filter, MessageSquare, X, Download, Calendar,
-  Settings, ShieldCheck, AlertTriangle, Activity,
-  Globe, ExternalLink as LinkIcon, RefreshCw
+  Users, Target, Zap, 
+  Search, MessageSquare, X, 
+  Settings, Activity, 
+  RefreshCw, ShieldCheck, Link as LinkIcon, AlertTriangle
 } from 'lucide-react';
 
-/**
- * Interface para o seletor de chaves nativo do ambiente.
- * Definimos AIStudio separadamente para evitar conflitos de tipos globais.
- */
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
+// Acesso seguro ao aistudio via window para evitar conflitos de interface globais
+const getAiStudio = () => (window as any).aistudio;
 
 const AdminDashboard: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -32,8 +18,6 @@ const AdminDashboard: React.FC = () => {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [apiStatus, setApiStatus] = useState<'checking' | 'active' | 'inactive'>('checking');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   useEffect(() => {
     loadLeads();
@@ -46,66 +30,30 @@ const AdminDashboard: React.FC = () => {
   };
 
   const checkApiStatus = async () => {
-    try {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setApiStatus(hasKey ? 'active' : 'inactive');
-      } else {
+    const aistudio = getAiStudio();
+    if (aistudio && typeof aistudio.hasSelectedApiKey === 'function') {
+      try {
+        const selected = await aistudio.hasSelectedApiKey();
+        setApiStatus(selected ? 'active' : 'inactive');
+      } catch (e) {
         setApiStatus('inactive');
       }
-    } catch (e) {
-      setApiStatus('inactive');
+    } else {
+      // Se não houver aistudio provider, assume que está usando a chave padrão do ambiente
+      setApiStatus('active');
     }
   };
 
-  const handleUpdateKey = async () => {
-    try {
-      if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        // A seleção é assíncrona, mas as instruções pedem para prosseguir.
-        // Tentamos verificar após um pequeno delay para a injeção da key
-        setTimeout(() => verifyConnection(), 500);
-      }
-    } catch (err) {
-      console.error("Erro ao abrir seletor de chaves:", err);
-    }
-  };
-
-  const verifyConnection = async () => {
-    setIsVerifying(true);
-    setVerifyError(null);
-    try {
-      // Criamos a instância na hora para garantir que pegamos a Key injetada
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: 'Ping para verificação de sistema. Responda apenas "OK".',
-      });
-      
-      if (response.text) {
+  const handleOpenSelectKey = async () => {
+    const aistudio = getAiStudio();
+    if (aistudio && typeof aistudio.openSelectKey === 'function') {
+      try {
+        await aistudio.openSelectKey();
+        // Assume sucesso conforme diretrizes de race condition
         setApiStatus('active');
-        alert("Sucesso! A conexão com a IA foi restabelecida e está funcional.");
+      } catch (e) {
+        console.error("Erro ao abrir seletor de chave:", e);
       }
-    } catch (err: any) {
-      setApiStatus('inactive');
-      let msg = err.message || "Erro desconhecido";
-      
-      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
-        msg = "Cota Esgotada (429). Você precisa vincular uma chave de um projeto com faturamento ativo (Pago) no Google Cloud para evitar este limite.";
-      } else if (msg.includes("Requested entity was not found")) {
-        msg = "Chave inválida ou projeto não encontrado. Selecione outra chave.";
-      }
-      
-      setVerifyError(msg);
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (confirm('Excluir este lead permanentemente?')) {
-      await LeadService.deleteLead(id);
-      loadLeads();
     }
   };
 
@@ -181,22 +129,17 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Search & Filter Bar */}
-        <div className="bg-white p-3 md:p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-3">
+        {/* Search Bar */}
+        <div className="bg-white p-3 md:p-4 rounded-2xl shadow-sm border border-gray-100">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
               type="text" 
-              placeholder="Buscar por nome, e-mail..."
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              placeholder="Buscar leads..."
+              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
-          </div>
-          <div className="flex gap-2">
-            <button className="flex items-center justify-center gap-2 bg-white border border-gray-100 px-4 py-2 rounded-xl text-xs md:text-sm text-gray-600 hover:bg-gray-50">
-              <Filter className="w-4 h-4" /> Filtrar
-            </button>
           </div>
         </div>
 
@@ -207,13 +150,12 @@ const AdminDashboard: React.FC = () => {
               <tr>
                 <th className="px-6 py-4">Lead</th>
                 <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Score IA</th>
                 <th className="px-6 py-4 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredLeads.map((lead) => (
-                <tr key={lead.id} className="hover:bg-gray-50/50 transition-colors group">
+                <tr key={lead.id} className="hover:bg-gray-50/50 group">
                   <td className="px-6 py-4">
                     <div className="font-bold text-sm text-gray-900">{lead.name || 'Anônimo'}</div>
                     <div className="text-[10px] text-gray-400">{lead.id}</div>
@@ -225,33 +167,13 @@ const AdminDashboard: React.FC = () => {
                       {lead.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-12 bg-gray-100 h-1 rounded-full overflow-hidden">
-                        <div className="bg-blue-600 h-full" style={{ width: `${lead.score}%` }} />
-                      </div>
-                      <span className="text-[10px] font-bold text-gray-600">{lead.score}%</span>
-                    </div>
-                  </td>
                   <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
-                        <MessageSquare className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(lead.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                      <MessageSquare className="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
               ))}
-              {filteredLeads.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-6 py-10 text-center text-gray-400 text-sm italic">
-                    Nenhum lead encontrado para os critérios de busca.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
@@ -267,8 +189,8 @@ const AdminDashboard: React.FC = () => {
                   <Settings className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 leading-none">Configurações de IA</h3>
-                  <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest mt-1">Infraestrutura Gemini</p>
+                  <h3 className="text-lg font-bold text-gray-900 leading-none">Painel de Infraestrutura</h3>
+                  <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest mt-1">Gestão de Chaves Gemini</p>
                 </div>
               </div>
               <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -280,62 +202,49 @@ const AdminDashboard: React.FC = () => {
               {/* API Status Section */}
               <div className={`p-6 rounded-3xl border transition-all ${
                 apiStatus === 'active' ? 'bg-green-50/50 border-green-100' : 
-                apiStatus === 'checking' ? 'bg-blue-50/50 border-blue-100' : 
                 'bg-red-50/50 border-red-100'
               }`}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <Activity className={`w-5 h-5 ${apiStatus === 'active' ? 'text-green-600' : 'text-gray-400'}`} />
-                    <span className="text-sm font-bold text-gray-700">Status da API</span>
+                    <span className="text-sm font-bold text-gray-700">Status do Motor de IA</span>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
                     apiStatus === 'active' ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'
                   }`}>
-                    {apiStatus === 'active' ? 'Online' : apiStatus === 'checking' ? 'Verificando...' : 'Offline'}
+                    {apiStatus === 'active' ? 'Ativo' : 'Inativo'}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 leading-relaxed">
                   {apiStatus === 'active' 
-                    ? 'Sistema conectado. Sua chave API está ativa e pronta para uso em escala.'
-                    : 'Sistema desconectado ou com cota excedida. Vincule uma nova chave para continuar.'}
+                    ? 'O sistema está operando normalmente. Para evitar limites de cota, você pode selecionar uma chave dedicada.'
+                    : 'A chave atual pode estar sofrendo limitações. Clique abaixo para selecionar uma chave paga.'}
                 </p>
               </div>
 
-              {verifyError && (
-                <div className="bg-red-50 p-4 rounded-2xl border border-red-100 flex gap-3 text-red-600">
-                  <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <p className="text-[11px] font-medium leading-normal">{verifyError}</p>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="space-y-3">
+              {/* API Key Selection Button */}
+              <div className="space-y-4">
                 <button 
-                  onClick={handleUpdateKey}
+                  onClick={handleOpenSelectKey}
                   className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-100 flex items-center justify-center gap-3 transition-all active:scale-95"
                 >
                   <ShieldCheck className="w-5 h-5" />
-                  Alterar / Vincular Nova Chave
+                  Selecionar Chave de Projeto Pago
                 </button>
-                <button 
-                  onClick={verifyConnection}
-                  disabled={isVerifying}
-                  className="w-full py-3 border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                >
-                  {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
-                  Testar Conexão Agora
-                </button>
+                <p className="text-[11px] text-gray-500 text-center leading-relaxed">
+                  Utilizar uma chave de um projeto com faturamento ativo garante maior estabilidade e evita o Erro 429.
+                </p>
               </div>
 
               <div className="pt-4 border-t border-gray-100">
                 <div className="bg-amber-50 rounded-2xl p-4 flex gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
                   <div>
-                    <p className="text-[11px] font-bold text-amber-900 mb-1">Dica de Faturamento:</p>
+                    <p className="text-[11px] font-bold text-amber-900 mb-1">Dica de Estabilidade</p>
                     <p className="text-[10px] text-amber-700 leading-relaxed">
-                      Para evitar erros 429 (Cota Esgotada), utilize uma chave de um projeto com faturamento ativo. 
+                      Se encontrar erros de cota, certifique-se de estar usando uma chave de um projeto do Google Cloud com faturamento ativado.
                       <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="ml-1 font-bold underline inline-flex items-center gap-0.5">
-                        Ver Documentação <LinkIcon className="w-2 h-2" />
+                        Docs de Faturamento <LinkIcon className="w-2 h-2" />
                       </a>
                     </p>
                   </div>
@@ -344,7 +253,7 @@ const AdminDashboard: React.FC = () => {
             </div>
 
             <div className="p-6 bg-gray-50/50 border-t border-gray-100 text-center">
-               <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Dgital Soluctions - AI Admin v3.0</p>
+               <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Dgital Soluctions - AI Control Engine</p>
             </div>
           </div>
         </div>
@@ -355,30 +264,17 @@ const AdminDashboard: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden">
             <div className="p-6 border-b flex items-center justify-between bg-white shrink-0">
-               <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
-                   {selectedLead.name.charAt(0)}
-                 </div>
-                 <div>
-                   <h3 className="font-bold text-gray-900">Histórico de {selectedLead.name}</h3>
-                   <p className="text-[10px] text-gray-400 uppercase tracking-tighter">Status: {selectedLead.status} • Stage: {selectedLead.stage}</p>
-                 </div>
-               </div>
+               <h3 className="font-bold text-gray-900">Histórico de {selectedLead.name}</h3>
                <button onClick={() => setSelectedLead(null)} className="p-2 hover:bg-gray-100 rounded-xl"><X /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
-               {selectedLead.messages?.length > 0 ? selectedLead.messages.map((m, idx) => (
+               {selectedLead.messages?.map((m, idx) => (
                  <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-4 rounded-2xl max-w-[85%] text-sm shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-gray-800 rounded-tl-none'}`}>
+                    <div className={`p-4 rounded-2xl max-w-[85%] text-sm ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800'}`}>
                        {m.text}
-                       <div className={`text-[8px] mt-1 opacity-60 ${m.role === 'user' ? 'text-blue-100' : 'text-gray-400'}`}>
-                         {new Date(m.timestamp).toLocaleTimeString()}
-                       </div>
                     </div>
                  </div>
-               )) : (
-                 <div className="text-center py-20 text-gray-400 italic">Sem histórico de mensagens.</div>
-               )}
+               ))}
             </div>
           </div>
         </div>
