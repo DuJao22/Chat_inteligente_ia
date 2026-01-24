@@ -7,9 +7,10 @@ Obrigatório: Resposta + <analysis>{"stage":"...","status":"...","score":0,"next
 
 /**
  * getGeminiChat - Dgital Soluctions
- * Reduzido para 3 mensagens para minimizar o uso de Tokens por Minuto (TPM).
+ * Sempre cria uma nova instância para garantir o uso da chave API mais recente selecionada pelo Admin.
  */
 export const getGeminiChat = (history: Message[] = []) => {
+  // A chave é injetada automaticamente após window.aistudio.openSelectKey()
   const apiKey = process.env.API_KEY || (window as any).VITE_API_KEY;
   
   if (!apiKey) {
@@ -18,8 +19,8 @@ export const getGeminiChat = (history: Message[] = []) => {
 
   const ai = new GoogleGenAI({ apiKey });
   
-  // Apenas as últimas 3 mensagens para economizar cota no plano gratuito
-  const optimizedHistory = history.slice(-3);
+  // Limitação de histórico para 4 mensagens (equilíbrio entre contexto e economia de cota)
+  const optimizedHistory = history.slice(-4);
 
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
