@@ -5,14 +5,13 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Bot, Rocket, LayoutDashboard, MessageCircle, Menu, X, AlertTriangle, Clock, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Send, Rocket, LayoutDashboard, MessageCircle, Menu, X, Clock, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
   const [admin, setAdmin] = useState<AdminUser>({ isAuthenticated: false, username: null });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [apiStatus, setApiStatus] = useState<'online' | 'reconnecting' | 'offline'>('online');
@@ -41,16 +40,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (chatState.messages.length === 0 && view === 'chat') {
-      handleBotInitialGreeting();
+      const botMsg: Message = { 
+        id: 'init', 
+        role: 'model', 
+        text: "Olá! Bem-vindo à Dgital Soluctions. Como posso ajudar seu negócio a escalar hoje?", 
+        timestamp: new Date() 
+      };
+      setChatState(prev => ({ ...prev, messages: [botMsg] }));
     }
   }, [view]);
-
-  const handleBotInitialGreeting = async () => {
-    const text = "Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio hoje?";
-    const botMsg: Message = { id: Date.now().toString(), role: 'model', text, timestamp: new Date() };
-    setChatState(prev => ({ ...prev, messages: [botMsg] }));
-    await persistLeadData([botMsg]);
-  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -58,52 +56,7 @@ const App: React.FC = () => {
     }
   }, [chatState.messages, chatState.isThinking]);
 
-  const handleBotResponse = async (rawText: string) => {
-    const { cleanText, analysis } = parseAnalysis(rawText);
-    const botMsg: Message = { id: Date.now().toString(), role: 'model', text: cleanText, timestamp: new Date() };
-    const newMessages = [...chatState.messages, botMsg];
-    setChatState(prev => ({
-      ...prev,
-      messages: newMessages,
-      isThinking: false,
-      currentStage: (analysis?.stage as FunnelStage) || prev.currentStage,
-      leadStatus: (analysis?.status as LeadStatus) || prev.leadStatus,
-    }));
-    await persistLeadData(newMessages, analysis);
-  };
-
-  const persistLeadData = async (messages: Message[], analysis?: any) => {
-    const existing = await LeadService.getLeadById(leadId);
-    const baseLead: Lead = existing || {
-      id: leadId,
-      name: 'Lead Dgital',
-      status: LeadStatus.COLD,
-      stage: FunnelStage.OPENING,
-      score: 0,
-      lastActive: new Date(),
-      messages: []
-    };
-    const updatedLead: Lead = {
-      ...baseLead,
-      messages,
-      lastActive: new Date(),
-      status: analysis?.status || baseLead.status,
-      stage: analysis?.stage || baseLead.stage,
-      score: analysis?.score || baseLead.score,
-      name: analysis?.extracted_data?.name || baseLead.name,
-      email: analysis?.extracted_data?.email || baseLead.email,
-      phone: analysis?.extracted_data?.phone || baseLead.phone,
-      needs: analysis?.extracted_data?.main_need || baseLead.needs,
-    };
-    await LeadService.saveLead(updatedLead);
-  };
-
   const performSendMessage = async (messageText: string, currentRetry = 0) => {
-    if (!process.env.API_KEY) {
-      setHasApiKey(false);
-      return;
-    }
-
     setChatState(prev => ({ ...prev, isThinking: true }));
     setRetryAttempt(currentRetry);
     if (currentRetry > 0) setApiStatus('reconnecting');
@@ -111,30 +64,55 @@ const App: React.FC = () => {
     try {
       const chat = getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: messageText });
-      const responseText = result.text || "Erro no processamento.";
-      setRetryAttempt(0);
-      setApiStatus('online');
-      handleBotResponse(responseText);
-    } catch (err: any) {
-      const errStr = JSON.stringify(err);
+      const responseText = result.text || "Sem resposta.";
       
-      // RELICON: Retry Automático para 429
-      if ((errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED")) && currentRetry < 3) {
-        const waitTime = (currentRetry + 1) * 3000;
-        setTimeout(() => performSendMessage(messageText, currentRetry + 1), waitTime);
+      const { cleanText, analysis } = parseAnalysis(responseText);
+      const botMsg: Message = { id: Date.now().toString(), role: 'model', text: cleanText, timestamp: new Date() };
+      
+      setChatState(prev => ({
+        ...prev,
+        messages: [...prev.messages, botMsg],
+        isThinking: false,
+        currentStage: (analysis?.stage as FunnelStage) || prev.currentStage,
+        leadStatus: (analysis?.status as LeadStatus) || prev.leadStatus,
+      }));
+      setApiStatus('online');
+      setRetryAttempt(0);
+
+      // Persistência
+      const existing = await LeadService.getLeadById(leadId);
+      const updatedLead: Lead = {
+        ...(existing || { id: leadId, name: 'Lead', status: LeadStatus.COLD, stage: FunnelStage.OPENING, score: 0, lastActive: new Date(), messages: [] }),
+        messages: [...chatState.messages, botMsg],
+        lastActive: new Date(),
+        status: analysis?.status || existing?.status || LeadStatus.COLD,
+        stage: analysis?.stage || existing?.stage || FunnelStage.OPENING,
+        score: analysis?.score || existing?.score || 0
+      };
+      await LeadService.saveLead(updatedLead);
+
+    } catch (err: any) {
+      const errStr = String(err);
+      
+      // LOGIC RELICON: Se for erro 429 ou rede, tenta até 4 vezes com espera progressiva
+      if ((errStr.includes("429") || errStr.includes("RESOURCES_EXHAUSTED") || errStr.includes("fetch")) && currentRetry < 4) {
+        const wait = (currentRetry + 1) * 2000;
+        console.warn(`Relicon: Tentativa ${currentRetry + 1} em ${wait}ms`);
+        setTimeout(() => performSendMessage(messageText, currentRetry + 1), wait);
         return;
       }
 
       setApiStatus('offline');
       setCooldownSeconds(30);
-      setRetryAttempt(0);
       setChatState(prev => ({ 
         ...prev, 
         isThinking: false,
         messages: [...prev.messages, { 
           id: 'err-' + Date.now(), 
           role: 'model', 
-          text: "O sistema atingiu o limite temporário de requisições do Google. Vamos restabelecer a conexão em instantes.", 
+          text: errStr.includes("API_KEY_MISSING") 
+            ? "Erro de Configuração: API_KEY não encontrada no Render." 
+            : "O sistema do Google está sobrecarregado. Por favor, aguarde 30 segundos para reconectar.", 
           timestamp: new Date() 
         }]
       }));
@@ -153,49 +131,38 @@ const App: React.FC = () => {
     await performSendMessage(currentInput);
   };
 
-  const handleRetry = async () => {
-    if (cooldownSeconds > 0) return;
-    setChatState(prev => ({
-      ...prev,
-      messages: prev.messages.filter(m => !m.id.startsWith('err-'))
-    }));
-    await performSendMessage(lastInput);
-  };
-
   if (view === 'login' && !admin.isAuthenticated) {
     return <AdminLogin onLogin={(u, p) => {
       if (u === 'admin' && p === 'dujao22') {
-        setAdmin({ isAuthenticated: true, username: 'Gestor Dgital' });
+        setAdmin({ isAuthenticated: true, username: 'Gestor' });
         setView('admin');
       } else {
-        setLoginError('Acesso restrito.');
+        setLoginError('Acesso negado.');
       }
     }} error={loginError} />;
   }
 
   return (
     <div className="flex flex-col md:flex-row h-[100dvh] w-full overflow-hidden bg-slate-50">
-      <aside className={`fixed inset-y-0 left-0 w-80 bg-white border-r border-gray-200 flex flex-col z-50 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 border-b border-gray-100 flex items-center gap-3">
+      <aside className={`fixed inset-y-0 left-0 w-80 bg-white border-r flex flex-col z-50 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-6 border-b flex items-center gap-3">
           <Rocket className="text-blue-600 w-6 h-6" />
           <h1 className="font-bold text-gray-900">Dgital Soluctions</h1>
         </div>
-        <div className="p-4 flex-1 overflow-y-auto">
-          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <MessageCircle className="w-5 h-5" /> Consultoria Digital
+        <div className="p-4 flex-1">
+          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <MessageCircle className="w-5 h-5" /> Chat Consultor
           </button>
-          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <LayoutDashboard className="w-5 h-5" /> Painel de Leads
+          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <LayoutDashboard className="w-5 h-5" /> Painel Admin
           </button>
         </div>
-        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center justify-between shrink-0">
+        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500' : apiStatus === 'reconnecting' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`}></div>
-            <span className="font-bold uppercase tracking-tighter">
-              {apiStatus === 'online' ? 'Sistema Online' : apiStatus === 'reconnecting' ? 'Relicon Ativo' : 'Offline'}
-            </span>
+            <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
+            <span className="font-bold uppercase tracking-tighter">{apiStatus === 'online' ? 'Sistema Ativo' : 'Sincronizando'}</span>
           </div>
-          {cooldownSeconds > 0 && <span className="text-red-500 font-bold">{cooldownSeconds}s</span>}
+          {cooldownSeconds > 0 && <span className="text-red-500 font-bold">Aguarde {cooldownSeconds}s</span>}
         </div>
       </aside>
 
@@ -205,7 +172,7 @@ const App: React.FC = () => {
             <Rocket className="text-blue-600 w-5 h-5" />
             <span className="font-bold text-gray-900">Dgital</span>
           </div>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-500">
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2">
             {isSidebarOpen ? <X /> : <Menu />}
           </button>
         </div>
@@ -218,34 +185,31 @@ const App: React.FC = () => {
                   key={msg.id} 
                   message={msg} 
                   isError={msg.id.startsWith('err-')} 
-                  onRetry={msg.id.startsWith('err-') && cooldownSeconds === 0 ? handleRetry : undefined}
+                  onRetry={msg.id.startsWith('err-') && cooldownSeconds === 0 ? () => performSendMessage(lastInput) : undefined}
                 />
               ))}
               {chatState.isThinking && (
-                <div className="flex gap-2 items-center text-blue-500 text-[11px] font-bold px-4">
-                  <RefreshCw className={`w-3.5 h-3.5 ${retryAttempt > 0 ? 'animate-spin' : 'animate-pulse'}`} />
-                  <span>{retryAttempt > 0 ? `RELICON: Tentativa ${retryAttempt}...` : 'Consultor analisando...'}</span>
+                <div className="flex gap-2 items-center text-blue-500 text-[11px] font-bold px-4 animate-pulse">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>{retryAttempt > 0 ? `Relicon: Tentativa de Conexão ${retryAttempt}...` : 'Consultor analisando seu negócio...'}</span>
                 </div>
               )}
             </div>
 
-            <div className="p-4 md:p-6 bg-white border-t shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="p-4 md:p-6 bg-white border-t shrink-0">
               <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
-                <div className="relative flex-1">
-                  <input 
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder={cooldownSeconds > 0 ? `Reconexão em ${cooldownSeconds}s...` : "Como podemos escalar seu negócio?"}
-                    className={`w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm ${cooldownSeconds > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    disabled={chatState.isThinking || cooldownSeconds > 0}
-                  />
-                  {cooldownSeconds > 0 && <Clock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500 animate-pulse" />}
-                </div>
+                <input 
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={cooldownSeconds > 0 ? `Reconectando em ${cooldownSeconds}s...` : "Como podemos escalar seu negócio?"}
+                  className={`flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 text-sm ${cooldownSeconds > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={chatState.isThinking || cooldownSeconds > 0}
+                />
                 <button 
                   type="submit" 
                   disabled={!input.trim() || chatState.isThinking || cooldownSeconds > 0} 
-                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
+                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 shadow-lg"
                 >
                   <Send className="w-5 h-5" />
                 </button>

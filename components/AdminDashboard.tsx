@@ -1,16 +1,16 @@
-
 import React, { useState, useEffect } from 'react';
 import { LeadService } from '../services/dbService';
-import { Lead, LeadStatus } from '../types';
+import { Lead, LeadStatus, Message } from '../types';
 import { 
   Users, Target, Zap, Phone, Mail, 
   Search, Trash2, ExternalLink,
-  Filter, ChevronRight
+  Filter, MessageSquare, X, Download, Calendar
 } from 'lucide-react';
 
 const AdminDashboard: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [filter, setFilter] = useState<string>('');
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
   useEffect(() => {
     loadLeads();
@@ -40,20 +40,38 @@ const AdminDashboard: React.FC = () => {
     avgScore: leads.length ? Math.round(leads.reduce((acc, curr) => acc + curr.score, 0) / leads.length) : 0
   };
 
+  const exportData = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(leads, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "leads_dgital_history.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
   return (
-    <div className="flex-1 bg-slate-50 overflow-y-auto p-4 md:p-8 h-full">
+    <div className="flex-1 bg-slate-50 overflow-y-auto p-4 md:p-8 h-full relative">
       <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
         
         {/* Header Section */}
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-xl md:text-2xl font-bold text-gray-900 tracking-tight">CRM da Agência</h1>
               <p className="text-gray-500 text-xs md:text-sm">Gestão de Leads Capturados pela IA</p>
             </div>
-            <button onClick={loadLeads} className="bg-white border border-gray-200 px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium hover:bg-gray-50 shadow-sm transition-colors">
-              Atualizar
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={exportData}
+                className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-xs md:text-sm font-bold hover:bg-blue-100 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Exportar Histórico
+              </button>
+              <button onClick={loadLeads} className="bg-white border border-gray-200 px-4 py-2 rounded-xl text-xs md:text-sm font-medium hover:bg-gray-50 shadow-sm transition-colors">
+                Atualizar
+              </button>
+            </div>
           </div>
         </div>
 
@@ -144,6 +162,9 @@ const AdminDashboard: React.FC = () => {
                     <span className="text-[10px] font-bold text-gray-700">{lead.score}%</span>
                   </div>
                   <div className="flex gap-2">
+                    <button onClick={() => setSelectedLead(lead)} className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
+                      <MessageSquare className="w-4 h-4" />
+                    </button>
                     {lead.phone && (
                       <a href={`https://wa.me/${lead.phone.replace(/\D/g,'')}`} target="_blank" className="p-2.5 bg-green-50 text-green-600 rounded-lg">
                         <ExternalLink className="w-4 h-4" />
@@ -207,6 +228,9 @@ const AdminDashboard: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Ver Histórico">
+                          <MessageSquare className="w-4 h-4" />
+                        </button>
                         {lead.phone && (
                           <a href={`https://wa.me/${lead.phone.replace(/\D/g,'')}`} target="_blank" className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="WhatsApp">
                             <ExternalLink className="w-4 h-4" />
@@ -233,6 +257,128 @@ const AdminDashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* LEAD HISTORY MODAL */}
+      {selectedLead && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
+            {/* Modal Header */}
+            <div className="p-6 md:p-8 border-b border-gray-100 flex items-center justify-between shrink-0 bg-white">
+              <div className="flex items-center gap-4">
+                <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-white shrink-0">
+                  <MessageSquare className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg md:text-xl font-bold text-gray-900">{selectedLead.name || 'Histórico do Lead'}</h3>
+                  <p className="text-xs text-gray-500 flex items-center gap-2">
+                    <Calendar className="w-3 h-3" /> 
+                    Última atividade: {new Date(selectedLead.lastActive).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedLead(null)}
+                className="p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-400"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50/50 space-y-8">
+              {/* Summary Section */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Status</p>
+                  <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                    selectedLead.status === LeadStatus.HOT ? 'bg-red-100 text-red-600' :
+                    selectedLead.status === LeadStatus.WARM ? 'bg-orange-100 text-orange-600' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>
+                    {selectedLead.status}
+                  </span>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Estágio no Funil</p>
+                  <p className="text-sm font-bold text-gray-900">{selectedLead.stage}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Score IA</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-blue-600 h-full" style={{ width: `${selectedLead.score}%` }} />
+                    </div>
+                    <span className="text-sm font-bold text-blue-600">{selectedLead.score}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Data Section */}
+              <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                 <h4 className="text-sm font-bold text-gray-900 border-b pb-2">Informações Coletadas</h4>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase">E-mail</p>
+                      <p className="text-sm text-gray-700">{selectedLead.email || 'Não informado'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase">WhatsApp</p>
+                      <p className="text-sm text-gray-700">{selectedLead.phone || 'Não informado'}</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <p className="text-[10px] font-bold text-gray-400 uppercase">Dor Diagnosticada</p>
+                      <p className="text-sm text-gray-700 italic">{selectedLead.needs || 'Nenhuma informação extraída'}</p>
+                    </div>
+                 </div>
+              </div>
+
+              {/* Chat Timeline */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-gray-900 border-b pb-2">Transcrição da Conversa</h4>
+                <div className="space-y-4">
+                  {selectedLead.messages && selectedLead.messages.length > 0 ? (
+                    selectedLead.messages.map((m: Message, idx: number) => (
+                      <div key={idx} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className={`max-w-[85%] p-4 rounded-2xl text-sm ${
+                          m.role === 'user' 
+                            ? 'bg-blue-600 text-white rounded-tr-none' 
+                            : 'bg-white border border-gray-100 text-gray-800 rounded-tl-none shadow-sm'
+                        }`}>
+                          <p className="whitespace-pre-wrap">{m.text}</p>
+                          <p className={`text-[10px] mt-2 opacity-60 ${m.role === 'user' ? 'text-blue-100' : 'text-gray-400'}`}>
+                            {new Date(m.timestamp).toLocaleTimeString()}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-center py-10 text-gray-400 text-sm italic">Nenhuma mensagem registrada.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-gray-100 bg-white shrink-0 flex justify-end gap-3">
+              <button 
+                onClick={() => setSelectedLead(null)}
+                className="px-6 py-2.5 rounded-xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-colors"
+              >
+                Fechar
+              </button>
+              {selectedLead.phone && (
+                <a 
+                  href={`https://wa.me/${selectedLead.phone.replace(/\D/g,'')}`}
+                  target="_blank"
+                  className="px-6 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-green-100 hover:bg-green-700 transition-all flex items-center gap-2"
+                >
+                  <Phone className="w-4 h-4" /> Chamar no Whats
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

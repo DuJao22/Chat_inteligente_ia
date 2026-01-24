@@ -1,27 +1,25 @@
 import { GoogleGenAI } from "@google/genai";
 import { Message } from "../types";
 
-export const SYSTEM_INSTRUCTION = `
-Você é o consultor de crescimento da "Dgital Soluctions". Venda: Tráfego, SaaS, Automações e LPs.
-Seja consultivo e direto. Sempre retorne sua resposta e o JSON de análise ao final.
-
-FORMATO OBRIGATÓRIO:
-[Sua resposta aqui]
-<analysis>{"stage": "...", "status": "...", "score": 0, "next_step": "...", "extracted_data": {}}</analysis>
-
-REGRAS: 1. Diagnóstico primeiro. 2. Peça contato. 3. Respostas curtas.
-`;
+export const SYSTEM_INSTRUCTION = `Agente Dgital Soluctions. Venda: Tráfego, Automação, SaaS e LP.
+Seja direto e consultivo. 
+Obrigatório: Resposta + <analysis>{"stage":"...","status":"...","score":0,"next_step":"...","extracted_data":{}}</analysis>`;
 
 /**
  * getGeminiChat - Dgital Soluctions
- * Otimizado para economizar cota de tokens (TPM).
+ * Reduzido para 3 mensagens para minimizar o uso de Tokens por Minuto (TPM).
  */
 export const getGeminiChat = (history: Message[] = []) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  const apiKey = process.env.API_KEY || (window as any).VITE_API_KEY;
   
-  // Otimização Relicon: Mantém apenas as últimas 4 mensagens. 
-  // Isso reduz drasticamente o consumo de tokens e evita erros 429.
-  const optimizedHistory = history.slice(-4);
+  if (!apiKey) {
+    throw new Error('API_KEY_MISSING');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  
+  // Apenas as últimas 3 mensagens para economizar cota no plano gratuito
+  const optimizedHistory = history.slice(-3);
 
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
@@ -29,7 +27,6 @@ export const getGeminiChat = (history: Message[] = []) => {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.7,
       topP: 0.8,
-      topK: 40
     },
     history: optimizedHistory.map(m => ({
       role: m.role,
@@ -46,7 +43,7 @@ export const parseAnalysis = (text: string) => {
       const analysis = JSON.parse(match[1]);
       return { cleanText, analysis };
     } catch (e) {
-      console.error("Analysis Parse Fail");
+      console.warn("Análise ignorada por erro de formatação");
     }
   }
   return { cleanText: text, analysis: null };
