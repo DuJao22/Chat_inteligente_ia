@@ -5,7 +5,7 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Rocket, LayoutDashboard, MessageCircle, Menu, X, Clock, RefreshCw } from 'lucide-react';
+import { Send, Rocket, LayoutDashboard, MessageCircle, Menu, X, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
@@ -79,7 +79,6 @@ const App: React.FC = () => {
       setApiStatus('online');
       setRetryAttempt(0);
 
-      // Persistência
       const existing = await LeadService.getLeadById(leadId);
       const updatedLead: Lead = {
         ...(existing || { id: leadId, name: 'Lead', status: LeadStatus.COLD, stage: FunnelStage.OPENING, score: 0, lastActive: new Date(), messages: [] }),
@@ -94,25 +93,27 @@ const App: React.FC = () => {
     } catch (err: any) {
       const errStr = String(err);
       
-      // LOGIC RELICON: Se for erro 429 ou rede, tenta até 4 vezes com espera progressiva
-      if ((errStr.includes("429") || errStr.includes("RESOURCES_EXHAUSTED") || errStr.includes("fetch")) && currentRetry < 4) {
+      if ((errStr.includes("429") || errStr.includes("RESOURCES_EXHAUSTED")) && currentRetry < 4) {
         const wait = (currentRetry + 1) * 2000;
-        console.warn(`Relicon: Tentativa ${currentRetry + 1} em ${wait}ms`);
         setTimeout(() => performSendMessage(messageText, currentRetry + 1), wait);
         return;
       }
 
       setApiStatus('offline');
       setCooldownSeconds(30);
+      
+      let friendlyError = "O sistema do Google está sobrecarregado. Por favor, aguarde 30 segundos.";
+      if (errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED")) {
+        friendlyError = "Erro de Cota (429): Limite atingido. Administrador: selecione uma chave API de projeto pago no painel de infraestrutura para liberar o sistema.";
+      }
+
       setChatState(prev => ({ 
         ...prev, 
         isThinking: false,
         messages: [...prev.messages, { 
           id: 'err-' + Date.now(), 
           role: 'model', 
-          text: errStr.includes("API_KEY_MISSING") 
-            ? "Erro de Configuração: API_KEY não encontrada no Render." 
-            : "O sistema do Google está sobrecarregado. Por favor, aguarde 30 segundos para reconectar.", 
+          text: friendlyError, 
           timestamp: new Date() 
         }]
       }));
@@ -162,11 +163,11 @@ const App: React.FC = () => {
             <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
             <span className="font-bold uppercase tracking-tighter">{apiStatus === 'online' ? 'Sistema Ativo' : 'Sincronizando'}</span>
           </div>
-          {cooldownSeconds > 0 && <span className="text-red-500 font-bold">Aguarde {cooldownSeconds}s</span>}
+          {cooldownSeconds > 0 && <span className="text-red-500 font-bold">Bloqueado {cooldownSeconds}s</span>}
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-white relative h-full">
+      <main className="flex-1 flex flex-col min-w-0 bg-white h-full relative">
         <div className="md:hidden flex items-center justify-between p-4 border-b bg-white shrink-0">
           <div className="flex items-center gap-2">
             <Rocket className="text-blue-600 w-5 h-5" />
@@ -191,7 +192,7 @@ const App: React.FC = () => {
               {chatState.isThinking && (
                 <div className="flex gap-2 items-center text-blue-500 text-[11px] font-bold px-4 animate-pulse">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>{retryAttempt > 0 ? `Relicon: Tentativa de Conexão ${retryAttempt}...` : 'Consultor analisando seu negócio...'}</span>
+                  <span>{retryAttempt > 0 ? `Tentativa de Conexão ${retryAttempt}...` : 'Consultor analisando seu negócio...'}</span>
                 </div>
               )}
             </div>
@@ -202,14 +203,14 @@ const App: React.FC = () => {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={cooldownSeconds > 0 ? `Reconectando em ${cooldownSeconds}s...` : "Como podemos escalar seu negócio?"}
-                  className={`flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 text-sm ${cooldownSeconds > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  placeholder={cooldownSeconds > 0 ? `Aguardando desbloqueio (${cooldownSeconds}s)` : "Como podemos escalar seu negócio?"}
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   disabled={chatState.isThinking || cooldownSeconds > 0}
                 />
                 <button 
                   type="submit" 
                   disabled={!input.trim() || chatState.isThinking || cooldownSeconds > 0} 
-                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 shadow-lg"
+                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 shadow-lg transition-all"
                 >
                   <Send className="w-5 h-5" />
                 </button>

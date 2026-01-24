@@ -8,15 +8,23 @@ Seja direto e consultivo.
 Obrigatório: Resposta + <analysis>{"stage":"...","status":"...","score":0,"next_step":"...","extracted_data":{}}</analysis>`;
 
 /**
+ * Recupera a melhor chave API disponível.
+ * Prioridade: Chave Manual (Painel) > process.env.API_KEY
+ */
+const getActiveApiKey = () => {
+  const manualKey = localStorage.getItem('dgital_custom_api_key');
+  return manualKey || process.env.API_KEY;
+};
+
+/**
  * getGeminiChat - Dgital Soluctions
- * Inicializa o chat utilizando a chave da variável de ambiente.
- * Nota: process.env.API_KEY é atualizado dinamicamente pelo sistema após a seleção no painel.
+ * Inicializa o chat utilizando a chave mestre definida.
  */
 export const getGeminiChat = (history: Message[] = []) => {
-  // Sempre criar uma nova instância para garantir o uso da chave mais recente injetada pelo aistudio provider
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = getActiveApiKey();
+  const ai = new GoogleGenAI({ apiKey: apiKey || '' });
   
-  // Otimização de histórico para manter o contexto relevante
+  // Otimização de histórico
   const optimizedHistory = history.slice(-5);
 
   return ai.chats.create({
