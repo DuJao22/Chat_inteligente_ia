@@ -8,20 +8,21 @@ import {
   Search, Trash2, ExternalLink,
   Filter, MessageSquare, X, Download, Calendar,
   Settings, ShieldCheck, AlertTriangle, Activity,
-  Globe, ExternalLink as LinkIcon
+  Globe, ExternalLink as LinkIcon, RefreshCw
 } from 'lucide-react';
 
 /**
- * Global declaration for AIStudio to avoid conflicts with ambient types.
+ * Interface para o seletor de chaves nativo do ambiente.
+ * Definimos AIStudio separadamente para evitar conflitos de tipos globais.
  */
 declare global {
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
     openSelectKey: () => Promise<void>;
   }
+
   interface Window {
-    // Making it optional to match potential pre-existing ambient declarations
-    aistudio?: AIStudio;
+    aistudio: AIStudio;
   }
 }
 
@@ -32,6 +33,7 @@ const AdminDashboard: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [apiStatus, setApiStatus] = useState<'checking' | 'active' | 'inactive'>('checking');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   useEffect(() => {
     loadLeads();
@@ -45,7 +47,6 @@ const AdminDashboard: React.FC = () => {
 
   const checkApiStatus = async () => {
     try {
-      // Using optional chaining to safely check for aistudio availability
       if (window.aistudio) {
         const hasKey = await window.aistudio.hasSelectedApiKey();
         setApiStatus(hasKey ? 'active' : 'inactive');
@@ -58,32 +59,44 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleUpdateKey = async () => {
-    // Safely trigger key selection dialog
-    await window.aistudio?.openSelectKey();
-    // Após abrir o seletor, tentamos verificar a chave imediatamente
-    verifyConnection();
+    try {
+      if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        // A seleção é assíncrona, mas as instruções pedem para prosseguir.
+        // Tentamos verificar após um pequeno delay para a injeção da key
+        setTimeout(() => verifyConnection(), 500);
+      }
+    } catch (err) {
+      console.error("Erro ao abrir seletor de chaves:", err);
+    }
   };
 
   const verifyConnection = async () => {
     setIsVerifying(true);
+    setVerifyError(null);
     try {
+      // Criamos a instância na hora para garantir que pegamos a Key injetada
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: 'Ping check',
+        contents: 'Ping para verificação de sistema. Responda apenas "OK".',
       });
       
       if (response.text) {
         setApiStatus('active');
-        alert("Sucesso! A nova chave API foi verificada e está ativa em todo o sistema.");
+        alert("Sucesso! A conexão com a IA foi restabelecida e está funcional.");
       }
     } catch (err: any) {
       setApiStatus('inactive');
-      if (err.message?.includes("Requested entity was not found")) {
-        alert("A chave selecionada parece ser de um projeto inválido. Por favor, selecione uma chave de um projeto faturado.");
-      } else {
-        alert("Erro na verificação: " + err.message);
+      let msg = err.message || "Erro desconhecido";
+      
+      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+        msg = "Cota Esgotada (429). Você precisa vincular uma chave de um projeto com faturamento ativo (Pago) no Google Cloud para evitar este limite.";
+      } else if (msg.includes("Requested entity was not found")) {
+        msg = "Chave inválida ou projeto não encontrado. Selecione outra chave.";
       }
+      
+      setVerifyError(msg);
     } finally {
       setIsVerifying(false);
     }
@@ -108,16 +121,6 @@ const AdminDashboard: React.FC = () => {
     avgScore: leads.length ? Math.round(leads.reduce((acc, curr) => acc + curr.score, 0) / leads.length) : 0
   };
 
-  const exportData = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(leads, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "leads_dgital_history.json");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-  };
-
   return (
     <div className="flex-1 bg-slate-50 overflow-y-auto p-4 md:p-8 h-full relative">
       <div className="max-w-7xl mx-auto space-y-6 md:space-y-8">
@@ -131,23 +134,17 @@ const AdminDashboard: React.FC = () => {
                   CRM da Agência
                   <button 
                     onClick={() => setShowSettings(true)}
-                    className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg transition-all text-gray-400 hover:text-blue-600 rotate-0 hover:rotate-90 duration-300"
+                    className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg transition-all text-gray-400 hover:text-blue-600 group"
                   >
-                    <Settings className="w-5 h-5" />
+                    <Settings className="w-5 h-5 group-hover:rotate-90 transition-transform duration-500" />
                   </button>
                 </h1>
                 <p className="text-gray-500 text-xs md:text-sm">Gestão de Leads Capturados pela IA</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button 
-                onClick={exportData}
-                className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-xs md:text-sm font-bold hover:bg-blue-100 transition-colors"
-              >
-                <Download className="w-4 h-4" /> Exportar Histórico
-              </button>
-              <button onClick={loadLeads} className="bg-white border border-gray-200 px-4 py-2 rounded-xl text-xs md:text-sm font-medium hover:bg-gray-50 shadow-sm transition-colors">
-                Atualizar
+              <button onClick={() => loadLeads()} className="bg-white border border-gray-200 px-4 py-2 rounded-xl text-xs md:text-sm font-medium hover:bg-gray-50 shadow-sm transition-colors flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" /> Atualizar Leads
               </button>
             </div>
           </div>
@@ -155,27 +152,27 @@ const AdminDashboard: React.FC = () => {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3 md:gap-4">
-            <div className="bg-blue-100 p-2 md:p-3 rounded-xl text-blue-600 shrink-0">
-              <Users className="w-5 h-5 md:w-6 md:h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+            <div className="bg-blue-100 p-3 rounded-xl text-blue-600 shrink-0">
+              <Users className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Total</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Total Leads</p>
               <h3 className="text-lg md:text-2xl font-bold leading-none mt-0.5">{stats.total}</h3>
             </div>
           </div>
-          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3 md:gap-4">
-            <div className="bg-red-100 p-2 md:p-3 rounded-xl text-red-600 shrink-0">
-              <Zap className="w-5 h-5 md:w-6 md:h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+            <div className="bg-red-100 p-3 rounded-xl text-red-600 shrink-0">
+              <Zap className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Hot</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Leads Hot</p>
               <h3 className="text-lg md:text-2xl font-bold leading-none mt-0.5">{stats.hot}</h3>
             </div>
           </div>
-          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3 md:gap-4 col-span-2 md:col-span-1">
-            <div className="bg-green-100 p-2 md:p-3 rounded-xl text-green-600 shrink-0">
-              <Target className="w-5 h-5 md:w-6 md:h-6" />
+          <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4 col-span-2 md:col-span-1">
+            <div className="bg-green-100 p-3 rounded-xl text-green-600 shrink-0">
+              <Target className="w-6 h-6" />
             </div>
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Score Médio</p>
@@ -196,95 +193,67 @@ const AdminDashboard: React.FC = () => {
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          <button className="flex items-center justify-center gap-2 bg-white border border-gray-100 px-4 py-2 rounded-xl text-xs md:text-sm text-gray-600 hover:bg-gray-50">
-            <Filter className="w-4 h-4" /> Filtrar
-          </button>
+          <div className="flex gap-2">
+            <button className="flex items-center justify-center gap-2 bg-white border border-gray-100 px-4 py-2 rounded-xl text-xs md:text-sm text-gray-600 hover:bg-gray-50">
+              <Filter className="w-4 h-4" /> Filtrar
+            </button>
+          </div>
         </div>
 
-        {/* Lead List Content */}
-        <div className="bg-white md:rounded-2xl shadow-sm md:border border-gray-100 overflow-hidden -mx-4 md:mx-0">
-          {/* Mobile View */}
-          <div className="md:hidden divide-y divide-gray-100">
-            {filteredLeads.map((lead) => (
-              <div key={lead.id} className="p-5 flex flex-col gap-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="text-sm font-bold text-gray-900">{lead.name || 'Visitante Novo'}</h4>
-                    <p className="text-[10px] text-gray-500 font-mono mt-0.5 uppercase tracking-tighter">ID: {lead.id}</p>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    lead.status === LeadStatus.HOT ? 'bg-red-100 text-red-600' :
-                    lead.status === LeadStatus.WARM ? 'bg-orange-100 text-orange-600' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>
-                    {lead.status}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-10 bg-gray-100 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-blue-600 h-full" style={{ width: `${lead.score}%` }} />
+        {/* Lead Table */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-gray-50 text-gray-400 text-[10px] uppercase font-bold tracking-wider">
+              <tr>
+                <th className="px-6 py-4">Lead</th>
+                <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4">Score IA</th>
+                <th className="px-6 py-4 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filteredLeads.map((lead) => (
+                <tr key={lead.id} className="hover:bg-gray-50/50 transition-colors group">
+                  <td className="px-6 py-4">
+                    <div className="font-bold text-sm text-gray-900">{lead.name || 'Anônimo'}</div>
+                    <div className="text-[10px] text-gray-400">{lead.id}</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      lead.status === LeadStatus.HOT ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {lead.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-12 bg-gray-100 h-1 rounded-full overflow-hidden">
+                        <div className="bg-blue-600 h-full" style={{ width: `${lead.score}%` }} />
+                      </div>
+                      <span className="text-[10px] font-bold text-gray-600">{lead.score}%</span>
                     </div>
-                    <span className="text-[10px] font-bold text-gray-700">{lead.score}%</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setSelectedLead(lead)} className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
-                      <MessageSquare className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleDelete(lead.id)} className="p-2.5 bg-red-50 text-red-600 rounded-lg">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Desktop Table */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-gray-50 text-gray-400 text-[10px] uppercase font-bold tracking-wider">
-                <tr>
-                  <th className="px-6 py-4">Lead / Contato</th>
-                  <th className="px-6 py-4">Status & Estágio</th>
-                  <th className="px-6 py-4">Score IA</th>
-                  <th className="px-6 py-4 text-right">Ações</th>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDelete(lead.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filteredLeads.map((lead) => (
-                  <tr key={lead.id} className="hover:bg-gray-50/50 transition-colors group">
-                    <td className="px-6 py-4 font-bold text-sm text-gray-900">{lead.name || 'Anônimo'}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        lead.status === LeadStatus.HOT ? 'bg-red-100 text-red-600' : 'bg-gray-100'
-                      }`}>
-                        {lead.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-12 bg-gray-100 h-1 rounded-full overflow-hidden">
-                          <div className="bg-blue-600 h-full" style={{ width: `${lead.score}%` }} />
-                        </div>
-                        <span className="text-[10px] font-bold">{lead.score}%</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(lead.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+              {filteredLeads.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-10 text-center text-gray-400 text-sm italic">
+                    Nenhum lead encontrado para os critérios de busca.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -307,95 +276,109 @@ const AdminDashboard: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-8 space-y-8">
+            <div className="p-8 space-y-6">
               {/* API Status Section */}
-              <div className={`p-5 rounded-3xl border ${
+              <div className={`p-6 rounded-3xl border transition-all ${
                 apiStatus === 'active' ? 'bg-green-50/50 border-green-100' : 
                 apiStatus === 'checking' ? 'bg-blue-50/50 border-blue-100' : 
                 'bg-red-50/50 border-red-100'
               }`}>
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <Activity className={`w-5 h-5 ${apiStatus === 'active' ? 'text-green-600' : 'text-gray-400'}`} />
-                    <span className="text-sm font-bold text-gray-700">Status da Conexão</span>
+                    <span className="text-sm font-bold text-gray-700">Status da API</span>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
                     apiStatus === 'active' ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'
                   }`}>
-                    {apiStatus === 'active' ? 'Online' : apiStatus === 'checking' ? 'Verificando...' : 'Desconectado'}
+                    {apiStatus === 'active' ? 'Online' : apiStatus === 'checking' ? 'Verificando...' : 'Offline'}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 leading-relaxed">
                   {apiStatus === 'active' 
-                    ? 'O sistema está conectado com sua chave API exclusiva. Limites de cota baseados no seu plano Google Cloud.'
-                    : 'Não foi detectada uma chave API válida. O sistema está operando no modo de cota compartilhada (sujeito a erros 429).'}
+                    ? 'Sistema conectado. Sua chave API está ativa e pronta para uso em escala.'
+                    : 'Sistema desconectado ou com cota excedida. Vincule uma nova chave para continuar.'}
                 </p>
               </div>
 
-              {/* Action Section */}
-              <div className="space-y-4">
-                <div className="flex flex-col gap-3">
-                  <button 
-                    onClick={handleUpdateKey}
-                    className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-100 flex items-center justify-center gap-3 transition-all active:scale-95"
-                  >
-                    <ShieldCheck className="w-5 h-5" />
-                    Vincular Nova Chave API
-                  </button>
-                  <button 
-                    onClick={verifyConnection}
-                    disabled={isVerifying}
-                    className="w-full py-3 border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                  >
-                    {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
-                    Testar Conectividade Agora
-                  </button>
+              {verifyError && (
+                <div className="bg-red-50 p-4 rounded-2xl border border-red-100 flex gap-3 text-red-600">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p className="text-[11px] font-medium leading-normal">{verifyError}</p>
                 </div>
+              )}
 
-                <div className="pt-4 border-t border-gray-100">
-                  <div className="bg-amber-50 rounded-2xl p-4 flex gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                    <div>
-                      <p className="text-[11px] font-bold text-amber-900 mb-1">Dica de Performance:</p>
-                      <p className="text-[10px] text-amber-700 leading-relaxed">
-                        Para evitar erros de "Cota Esgotada", use uma chave de um projeto com faturamento ativo no Google AI Studio.
-                        <a 
-                          href="https://ai.google.dev/gemini-api/docs/billing" 
-                          target="_blank" 
-                          className="inline-flex items-center gap-1 ml-1 font-bold underline"
-                        >
-                          Documentação <LinkIcon className="w-2.5 h-2.5" />
-                        </a>
-                      </p>
-                    </div>
+              {/* Action Buttons */}
+              <div className="space-y-3">
+                <button 
+                  onClick={handleUpdateKey}
+                  className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-100 flex items-center justify-center gap-3 transition-all active:scale-95"
+                >
+                  <ShieldCheck className="w-5 h-5" />
+                  Alterar / Vincular Nova Chave
+                </button>
+                <button 
+                  onClick={verifyConnection}
+                  disabled={isVerifying}
+                  className="w-full py-3 border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  {isVerifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+                  Testar Conexão Agora
+                </button>
+              </div>
+
+              <div className="pt-4 border-t border-gray-100">
+                <div className="bg-amber-50 rounded-2xl p-4 flex gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-bold text-amber-900 mb-1">Dica de Faturamento:</p>
+                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                      Para evitar erros 429 (Cota Esgotada), utilize uma chave de um projeto com faturamento ativo. 
+                      <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="ml-1 font-bold underline inline-flex items-center gap-0.5">
+                        Ver Documentação <LinkIcon className="w-2 h-2" />
+                      </a>
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="p-6 bg-gray-50/50 border-t border-gray-100 flex justify-center">
-               <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Dgital Soluctions - Admin Engine v2.5</p>
+            <div className="p-6 bg-gray-50/50 border-t border-gray-100 text-center">
+               <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Dgital Soluctions - AI Admin v3.0</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* SELECTED LEAD HISTORY MODAL - Mantido do código anterior */}
+      {/* LEAD HISTORY MODAL */}
       {selectedLead && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden">
             <div className="p-6 border-b flex items-center justify-between bg-white shrink-0">
-               <h3 className="font-bold text-gray-900">Histórico: {selectedLead.name}</h3>
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                   {selectedLead.name.charAt(0)}
+                 </div>
+                 <div>
+                   <h3 className="font-bold text-gray-900">Histórico de {selectedLead.name}</h3>
+                   <p className="text-[10px] text-gray-400 uppercase tracking-tighter">Status: {selectedLead.status} • Stage: {selectedLead.stage}</p>
+                 </div>
+               </div>
                <button onClick={() => setSelectedLead(null)} className="p-2 hover:bg-gray-100 rounded-xl"><X /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
-               {selectedLead.messages?.map((m, idx) => (
+               {selectedLead.messages?.length > 0 ? selectedLead.messages.map((m, idx) => (
                  <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-4 rounded-2xl max-w-[80%] text-sm ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border'}`}>
+                    <div className={`p-4 rounded-2xl max-w-[85%] text-sm shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-gray-800 rounded-tl-none'}`}>
                        {m.text}
+                       <div className={`text-[8px] mt-1 opacity-60 ${m.role === 'user' ? 'text-blue-100' : 'text-gray-400'}`}>
+                         {new Date(m.timestamp).toLocaleTimeString()}
+                       </div>
                     </div>
                  </div>
-               ))}
+               )) : (
+                 <div className="text-center py-20 text-gray-400 italic">Sem histórico de mensagens.</div>
+               )}
             </div>
           </div>
         </div>
@@ -403,10 +386,5 @@ const AdminDashboard: React.FC = () => {
     </div>
   );
 };
-
-// Ícone de Refresh inline para simplificar
-const RefreshCw = ({ className }: { className?: string }) => (
-  <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-);
 
 export default AdminDashboard;
