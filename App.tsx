@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { FunnelStage, LeadStatus, Message, ChatState, Lead, AdminUser } from './types';
 import { getGeminiChat, parseAnalysis } from './services/geminiService';
@@ -6,15 +5,16 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Bot, Rocket, LayoutDashboard, MessageCircle, Menu, X, AlertTriangle } from 'lucide-react';
+import { Send, Bot, Rocket, LayoutDashboard, MessageCircle, Menu, X, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
   const [admin, setAdmin] = useState<AdminUser>({ isAuthenticated: false, username: null });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  // A chave de API deve vir do ambiente via Vite define no config
   const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [retryAttempt, setRetryAttempt] = useState(0);
   
   const [leadId] = useState<string>(() => `lead_${Math.random().toString(36).substr(2, 9)}`);
   const [chatState, setChatState] = useState<ChatState>({
@@ -26,7 +26,16 @@ const App: React.FC = () => {
   });
 
   const [input, setInput] = useState('');
+  const [lastInput, setLastInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Cooldown timer logic
+  useEffect(() => {
+    if (cooldownSeconds > 0) {
+      const timer = setTimeout(() => setCooldownSeconds(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldownSeconds]);
 
   useEffect(() => {
     if (chatState.messages.length === 0 && view === 'chat') {
@@ -63,7 +72,6 @@ const App: React.FC = () => {
 
   const persistLeadData = async (messages: Message[], analysis?: any) => {
     const existing = await LeadService.getLeadById(leadId);
-    
     const baseLead: Lead = existing || {
       id: leadId,
       name: 'Lead Dgital',
@@ -90,45 +98,75 @@ const App: React.FC = () => {
     await LeadService.saveLead(updatedLead);
   };
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!input.trim() || chatState.isThinking) return;
-
+  const performSendMessage = async (messageText: string, currentRetry = 0) => {
     if (!process.env.API_KEY) {
       setHasApiKey(false);
       return;
-    } else {
-      setHasApiKey(true);
     }
 
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: input, timestamp: new Date() };
-    const newMessages = [...chatState.messages, userMsg];
-    setChatState(prev => ({ ...prev, messages: newMessages, isThinking: true }));
-    const currentInput = input;
-    setInput('');
+    setChatState(prev => ({ ...prev, isThinking: true }));
+    setRetryAttempt(currentRetry);
 
     try {
       const chat = getGeminiChat(chatState.messages);
-      const result = await chat.sendMessage({ message: currentInput });
+      const result = await chat.sendMessage({ message: messageText });
       const responseText = result.text || "Desculpe, tive um erro ao processar sua mensagem.";
+      setRetryAttempt(0);
       handleBotResponse(responseText);
     } catch (err: any) {
-      console.error("Chat Error:", err);
-      let errorMsg = "Desculpe, tive um problema na conexão. Pode tentar novamente?";
-      
+      console.error(`Chat Error (Attempt ${currentRetry + 1}):`, err);
       const errString = JSON.stringify(err);
+      
+      // Resiliência: Tentar novamente se for erro de cota (429) ou erro temporário
+      if ((errString.includes("RESOURCE_EXHAUSTED") || errString.includes("429")) && currentRetry < 3) {
+        const delay = (currentRetry + 1) * 2000; // Delay progressivo: 2s, 4s, 6s
+        console.log(`Retrying in ${delay}ms...`);
+        setTimeout(() => performSendMessage(messageText, currentRetry + 1), delay);
+        return;
+      }
+
+      let errorMsg = "Desculpe, tive um problema na conexão. Pode tentar novamente?";
       if (errString.includes("RESOURCE_EXHAUSTED") || errString.includes("429")) {
-        errorMsg = "Limite de uso da IA atingido para este período. Por favor, aguarde alguns minutos antes de continuar ou verifique sua cota no Google Cloud.";
+        errorMsg = "O sistema está sob alta carga ou limite de cota gratuito excedido. Aguarde um momento para 're-conectar'.";
+        setCooldownSeconds(20);
       } else if (err.message === 'API_KEY_MISSING') {
-        errorMsg = "Erro: Chave de API (API_KEY) não configurada no ambiente.";
+        errorMsg = "Erro: Chave de API (API_KEY) não configurada.";
       }
       
+      setRetryAttempt(0);
       setChatState(prev => ({ 
         ...prev, 
         isThinking: false,
-        messages: [...prev.messages, { id: 'err-' + Date.now(), role: 'model', text: errorMsg, timestamp: new Date() }]
+        messages: [...prev.messages, { 
+          id: 'err-' + Date.now(), 
+          role: 'model', 
+          text: errorMsg, 
+          timestamp: new Date() 
+        }]
       }));
     }
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!input.trim() || chatState.isThinking || cooldownSeconds > 0) return;
+
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: input, timestamp: new Date() };
+    setChatState(prev => ({ ...prev, messages: [...prev.messages, userMsg] }));
+    setLastInput(input);
+    const currentInput = input;
+    setInput('');
+    
+    await performSendMessage(currentInput);
+  };
+
+  const handleRetry = async () => {
+    if (cooldownSeconds > 0) return;
+    setChatState(prev => ({
+      ...prev,
+      messages: prev.messages.filter(m => !m.id.startsWith('err-'))
+    }));
+    await performSendMessage(lastInput);
   };
 
   if (view === 'login' && !admin.isAuthenticated) {
@@ -158,8 +196,8 @@ const App: React.FC = () => {
           </button>
         </div>
         <div className="p-4 border-t text-[10px] text-gray-400 flex items-center gap-2 shrink-0">
-          <div className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
-          {hasApiKey ? 'IA Operacional' : 'API Key Pendente'}
+          <div className={`w-2 h-2 rounded-full ${cooldownSeconds > 0 ? 'bg-amber-500' : hasApiKey ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
+          {cooldownSeconds > 0 ? `IA em Pausa (${cooldownSeconds}s)` : hasApiKey ? 'IA Conectada' : 'API Key Pendente'}
         </div>
       </aside>
 
@@ -180,31 +218,44 @@ const App: React.FC = () => {
               {!hasApiKey && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm mb-4">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <span>Configure a variável <b>API_KEY</b> no ambiente do Render para ativar a IA.</span>
+                  <span>Configure a variável <b>API_KEY</b> no ambiente para ativar a IA.</span>
                 </div>
               )}
-              {chatState.messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
+              {chatState.messages.map(msg => (
+                <ChatMessage 
+                  key={msg.id} 
+                  message={msg} 
+                  isError={msg.id.startsWith('err-')} 
+                  onRetry={msg.id.startsWith('err-') && cooldownSeconds === 0 ? handleRetry : undefined}
+                />
+              ))}
               {chatState.isThinking && (
-                <div className="flex gap-2 items-center text-blue-400 text-xs font-bold px-4 animate-pulse">
-                  <Bot className="w-4 h-4" />
-                  <span>Consultor analisando...</span>
+                <div className="flex gap-2 items-center text-blue-400 text-xs font-bold px-4">
+                  <RefreshCw className={`w-4 h-4 ${retryAttempt > 0 ? 'animate-spin' : 'animate-pulse'}`} />
+                  <span>{retryAttempt > 0 ? `Reconectando (Tentativa ${retryAttempt})...` : 'Consultor analisando...'}</span>
                 </div>
               )}
             </div>
 
             <div className="p-4 md:p-6 bg-white border-t shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {cooldownSeconds > 0 && (
+                <div className="mb-3 flex items-center justify-center gap-2 text-amber-600 text-[11px] font-bold uppercase tracking-wider">
+                  <Clock className="w-3.5 h-3.5" />
+                  Respeitando limites da API: {cooldownSeconds}s
+                </div>
+              )}
               <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
                 <input 
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Como podemos escalar seu negócio?"
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
-                  disabled={chatState.isThinking}
+                  placeholder={cooldownSeconds > 0 ? "Aguardando..." : "Como podemos escalar seu negócio?"}
+                  className={`flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm ${cooldownSeconds > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={chatState.isThinking || cooldownSeconds > 0}
                 />
                 <button 
                   type="submit" 
-                  disabled={!input.trim() || chatState.isThinking} 
+                  disabled={!input.trim() || chatState.isThinking || cooldownSeconds > 0} 
                   className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100"
                 >
                   <Send className="w-5 h-5" />

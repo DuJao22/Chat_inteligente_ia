@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { Message } from "../types";
 
@@ -29,19 +28,21 @@ Mantenha as respostas curtas e jamais mostre o JSON para o cliente.
 /**
  * getGeminiChat - Dgital Soluctions
  * Creates a new chat session with the growth consultant.
- * Following guidelines: obtained exclusively from process.env.API_KEY and using new GoogleGenAI({apiKey}).
+ * Following guidelines: obtained exclusively from process.env.API_KEY.
  */
 export const getGeminiChat = (history: Message[] = []) => {
-  // Always use process.env.API_KEY directly for initialization
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   
+  // Otimização agressiva de tokens: Mantém apenas as últimas 6 mensagens para evitar erro 429 por excesso de tokens
+  const optimizedHistory = history.slice(-6);
+
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.7,
     },
-    history: history.map(m => ({
+    history: optimizedHistory.map(m => ({
       role: m.role,
       parts: [{ text: m.text }]
     }))
