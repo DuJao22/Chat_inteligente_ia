@@ -9,14 +9,15 @@ Obrigatório: Resposta + <analysis>{"stage":"...","status":"...","score":0,"next
 
 /**
  * getGeminiChat - Dgital Soluctions
- * Inicializa o chat utilizando exclusivamente a chave da variável de ambiente.
+ * Inicializa o chat utilizando a chave da variável de ambiente.
+ * Nota: process.env.API_KEY é atualizado dinamicamente pelo sistema após a seleção no painel.
  */
 export const getGeminiChat = (history: Message[] = []) => {
-  // O SDK deve ser inicializado com process.env.API_KEY conforme diretrizes
+  // Sempre criar uma nova instância para garantir o uso da chave mais recente injetada pelo aistudio provider
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   // Otimização de histórico para manter o contexto relevante
-  const optimizedHistory = history.slice(-3);
+  const optimizedHistory = history.slice(-5);
 
   return ai.chats.create({
     model: 'gemini-3-flash-preview',

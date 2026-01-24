@@ -2,14 +2,15 @@
 import React, { useState, useEffect } from 'react';
 import { LeadService } from '../services/dbService';
 import { Lead, LeadStatus } from '../types';
+import { GoogleGenAI } from "@google/genai";
 import { 
   Users, Target, Zap, 
   Search, MessageSquare, X, 
   Settings, Activity, 
-  RefreshCw, ShieldCheck, Link as LinkIcon, AlertTriangle
+  RefreshCw, ShieldCheck, Link as LinkIcon, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 
-// Acesso seguro ao aistudio via window para evitar conflitos de interface globais
+// Acesso seguro ao aistudio via window
 const getAiStudio = () => (window as any).aistudio;
 
 const AdminDashboard: React.FC = () => {
@@ -17,7 +18,9 @@ const AdminDashboard: React.FC = () => {
   const [filter, setFilter] = useState<string>('');
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [apiStatus, setApiStatus] = useState<'checking' | 'active' | 'inactive'>('checking');
+  const [apiStatus, setApiStatus] = useState<'checking' | 'active' | 'inactive' | 'error'>('checking');
+  const [lastError, setLastError] = useState<string | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
 
   useEffect(() => {
     loadLeads();
@@ -34,13 +37,45 @@ const AdminDashboard: React.FC = () => {
     if (aistudio && typeof aistudio.hasSelectedApiKey === 'function') {
       try {
         const selected = await aistudio.hasSelectedApiKey();
-        setApiStatus(selected ? 'active' : 'inactive');
+        if (selected) {
+          // Se uma chave já foi selecionada anteriormente, fazemos um teste rápido
+          await testKey();
+        } else {
+          setApiStatus('inactive');
+        }
       } catch (e) {
         setApiStatus('inactive');
       }
     } else {
-      // Se não houver aistudio provider, assume que está usando a chave padrão do ambiente
+      // Caso não exista o provider (desenvolvimento local sem SDK)
       setApiStatus('active');
+    }
+  };
+
+  const testKey = async () => {
+    setIsTesting(true);
+    setLastError(null);
+    try {
+      // Criamos uma instância temporária para testar a cota da chave atual
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: 'ping',
+      });
+      if (response.text) {
+        setApiStatus('active');
+      }
+    } catch (err: any) {
+      setApiStatus('error');
+      let msg = err.message || "Erro desconhecido ao validar chave";
+      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+        msg = "Cota Esgotada (429). Esta chave pertence a um projeto gratuito com limites atingidos. Por favor, selecione uma chave de um projeto com faturamento (Billing) ativo.";
+      } else if (msg.includes("Requested entity was not found")) {
+        msg = "Chave Inválida. O projeto associado a esta chave não foi encontrado ou está desativado.";
+      }
+      setLastError(msg);
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -49,8 +84,8 @@ const AdminDashboard: React.FC = () => {
     if (aistudio && typeof aistudio.openSelectKey === 'function') {
       try {
         await aistudio.openSelectKey();
-        // Assume sucesso conforme diretrizes de race condition
-        setApiStatus('active');
+        // Após o usuário fechar o diálogo, aguardamos a injeção da chave e testamos
+        setTimeout(() => testKey(), 1000);
       } catch (e) {
         console.error("Erro ao abrir seletor de chave:", e);
       }
@@ -135,7 +170,7 @@ const AdminDashboard: React.FC = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
               type="text" 
-              placeholder="Buscar leads..."
+              placeholder="Buscar leads por nome ou status..."
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -168,7 +203,7 @@ const AdminDashboard: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                    <button onClick={() => setSelectedLead(lead)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                       <MessageSquare className="w-4 h-4" />
                     </button>
                   </td>
@@ -202,38 +237,56 @@ const AdminDashboard: React.FC = () => {
               {/* API Status Section */}
               <div className={`p-6 rounded-3xl border transition-all ${
                 apiStatus === 'active' ? 'bg-green-50/50 border-green-100' : 
-                'bg-red-50/50 border-red-100'
+                apiStatus === 'error' ? 'bg-red-50/50 border-red-100' :
+                'bg-slate-50 border-slate-200'
               }`}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <Activity className={`w-5 h-5 ${apiStatus === 'active' ? 'text-green-600' : 'text-gray-400'}`} />
-                    <span className="text-sm font-bold text-gray-700">Status do Motor de IA</span>
+                    <Activity className={`w-5 h-5 ${apiStatus === 'active' ? 'text-green-600' : apiStatus === 'error' ? 'text-red-600' : 'text-gray-400'}`} />
+                    <span className="text-sm font-bold text-gray-700">Validação da Cota</span>
                   </div>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                    apiStatus === 'active' ? 'bg-green-600 text-white' : 'bg-gray-400 text-white'
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                    apiStatus === 'active' ? 'bg-green-600 text-white' : 
+                    apiStatus === 'error' ? 'bg-red-600 text-white' : 
+                    'bg-gray-400 text-white'
                   }`}>
-                    {apiStatus === 'active' ? 'Ativo' : 'Inativo'}
+                    {apiStatus === 'active' ? 'Ativo' : apiStatus === 'error' ? 'Cota Esgotada' : 'Pendente'}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 leading-relaxed">
                   {apiStatus === 'active' 
-                    ? 'O sistema está operando normalmente. Para evitar limites de cota, você pode selecionar uma chave dedicada.'
-                    : 'A chave atual pode estar sofrendo limitações. Clique abaixo para selecionar uma chave paga.'}
+                    ? 'Chave validada com sucesso. O sistema está pronto para processar leads sem interrupções.'
+                    : apiStatus === 'error' 
+                      ? 'Atenção: A chave atual retornou erro 429. Isso impede o funcionamento do chatbot.'
+                      : 'Nenhuma chave personalizada detectada. O sistema está usando a cota pública limitada.'}
                 </p>
               </div>
 
-              {/* API Key Selection Button */}
+              {lastError && (
+                <div className="bg-red-50 p-4 rounded-2xl border border-red-100 flex gap-3 text-red-700">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p className="text-[11px] font-medium leading-normal">{lastError}</p>
+                </div>
+              )}
+
+              {/* API Key Actions */}
               <div className="space-y-4">
                 <button 
                   onClick={handleOpenSelectKey}
                   className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-sm shadow-xl shadow-blue-100 flex items-center justify-center gap-3 transition-all active:scale-95"
                 >
                   <ShieldCheck className="w-5 h-5" />
-                  Selecionar Chave de Projeto Pago
+                  {apiStatus === 'active' ? 'Trocar Chave de Projeto' : 'Vincular Chave de Projeto Pago'}
                 </button>
-                <p className="text-[11px] text-gray-500 text-center leading-relaxed">
-                  Utilizar uma chave de um projeto com faturamento ativo garante maior estabilidade e evita o Erro 429.
-                </p>
+                
+                <button 
+                  onClick={testKey}
+                  disabled={isTesting}
+                  className="w-full py-3 bg-white border border-gray-200 text-gray-600 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-gray-50 transition-all disabled:opacity-50"
+                >
+                  {isTesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                  Testar Conexão Novamente
+                </button>
               </div>
 
               <div className="pt-4 border-t border-gray-100">
@@ -242,10 +295,7 @@ const AdminDashboard: React.FC = () => {
                   <div>
                     <p className="text-[11px] font-bold text-amber-900 mb-1">Dica de Estabilidade</p>
                     <p className="text-[10px] text-amber-700 leading-relaxed">
-                      Se encontrar erros de cota, certifique-se de estar usando uma chave de um projeto do Google Cloud com faturamento ativado.
-                      <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="ml-1 font-bold underline inline-flex items-center gap-0.5">
-                        Docs de Faturamento <LinkIcon className="w-2 h-2" />
-                      </a>
+                      Se você continuar vendo erros 429, certifique-se de que o faturamento (Billing) está ativado no seu projeto do <a href="https://aistudio.google.com/app/billing" target="_blank" className="font-bold underline">Google AI Studio</a>. Chaves gratuitas são compartilhadas e bloqueiam com facilidade.
                     </p>
                   </div>
                 </div>
@@ -253,7 +303,7 @@ const AdminDashboard: React.FC = () => {
             </div>
 
             <div className="p-6 bg-gray-50/50 border-t border-gray-100 text-center">
-               <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Dgital Soluctions - AI Control Engine</p>
+               <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Dgital Soluctions - AI Control Engine v3.1</p>
             </div>
           </div>
         </div>
@@ -264,13 +314,13 @@ const AdminDashboard: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden">
             <div className="p-6 border-b flex items-center justify-between bg-white shrink-0">
-               <h3 className="font-bold text-gray-900">Histórico de {selectedLead.name}</h3>
-               <button onClick={() => setSelectedLead(null)} className="p-2 hover:bg-gray-100 rounded-xl"><X /></button>
+               <h3 className="font-bold text-gray-900">Conversa com {selectedLead.name}</h3>
+               <button onClick={() => setSelectedLead(null)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors"><X /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
                {selectedLead.messages?.map((m, idx) => (
                  <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-4 rounded-2xl max-w-[85%] text-sm ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-800'}`}>
+                    <div className={`p-4 rounded-2xl max-w-[85%] text-sm shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border text-gray-800 rounded-tl-none'}`}>
                        {m.text}
                     </div>
                  </div>
