@@ -5,7 +5,7 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Bot, Rocket, LayoutDashboard, MessageCircle, Menu, X, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
+import { Send, Bot, Rocket, LayoutDashboard, MessageCircle, Menu, X, AlertTriangle, Clock, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [retryAttempt, setRetryAttempt] = useState(0);
+  const [apiStatus, setApiStatus] = useState<'online' | 'reconnecting' | 'offline'>('online');
   
   const [leadId] = useState<string>(() => `lead_${Math.random().toString(36).substr(2, 9)}`);
   const [chatState, setChatState] = useState<ChatState>({
@@ -29,11 +30,12 @@ const App: React.FC = () => {
   const [lastInput, setLastInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Cooldown timer logic
   useEffect(() => {
     if (cooldownSeconds > 0) {
       const timer = setTimeout(() => setCooldownSeconds(prev => prev - 1), 1000);
       return () => clearTimeout(timer);
+    } else if (cooldownSeconds === 0 && apiStatus === 'offline') {
+      setApiStatus('online');
     }
   }, [cooldownSeconds]);
 
@@ -44,7 +46,7 @@ const App: React.FC = () => {
   }, [view]);
 
   const handleBotInitialGreeting = async () => {
-    const text = "Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio a escalar hoje?";
+    const text = "Olá! Bem-vindo à Dgital Soluctions. Sou seu consultor especialista em crescimento digital. Como posso ajudar seu negócio hoje?";
     const botMsg: Message = { id: Date.now().toString(), role: 'model', text, timestamp: new Date() };
     setChatState(prev => ({ ...prev, messages: [botMsg] }));
     await persistLeadData([botMsg]);
@@ -81,7 +83,6 @@ const App: React.FC = () => {
       lastActive: new Date(),
       messages: []
     };
-
     const updatedLead: Lead = {
       ...baseLead,
       messages,
@@ -94,7 +95,6 @@ const App: React.FC = () => {
       phone: analysis?.extracted_data?.phone || baseLead.phone,
       needs: analysis?.extracted_data?.main_need || baseLead.needs,
     };
-    
     await LeadService.saveLead(updatedLead);
   };
 
@@ -106,33 +106,27 @@ const App: React.FC = () => {
 
     setChatState(prev => ({ ...prev, isThinking: true }));
     setRetryAttempt(currentRetry);
+    if (currentRetry > 0) setApiStatus('reconnecting');
 
     try {
       const chat = getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: messageText });
-      const responseText = result.text || "Desculpe, tive um erro ao processar sua mensagem.";
+      const responseText = result.text || "Erro no processamento.";
       setRetryAttempt(0);
+      setApiStatus('online');
       handleBotResponse(responseText);
     } catch (err: any) {
-      console.error(`Chat Error (Attempt ${currentRetry + 1}):`, err);
-      const errString = JSON.stringify(err);
+      const errStr = JSON.stringify(err);
       
-      // Resiliência: Tentar novamente se for erro de cota (429) ou erro temporário
-      if ((errString.includes("RESOURCE_EXHAUSTED") || errString.includes("429")) && currentRetry < 3) {
-        const delay = (currentRetry + 1) * 2000; // Delay progressivo: 2s, 4s, 6s
-        console.log(`Retrying in ${delay}ms...`);
-        setTimeout(() => performSendMessage(messageText, currentRetry + 1), delay);
+      // RELICON: Retry Automático para 429
+      if ((errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED")) && currentRetry < 3) {
+        const waitTime = (currentRetry + 1) * 3000;
+        setTimeout(() => performSendMessage(messageText, currentRetry + 1), waitTime);
         return;
       }
 
-      let errorMsg = "Desculpe, tive um problema na conexão. Pode tentar novamente?";
-      if (errString.includes("RESOURCE_EXHAUSTED") || errString.includes("429")) {
-        errorMsg = "O sistema está sob alta carga ou limite de cota gratuito excedido. Aguarde um momento para 're-conectar'.";
-        setCooldownSeconds(20);
-      } else if (err.message === 'API_KEY_MISSING') {
-        errorMsg = "Erro: Chave de API (API_KEY) não configurada.";
-      }
-      
+      setApiStatus('offline');
+      setCooldownSeconds(30);
       setRetryAttempt(0);
       setChatState(prev => ({ 
         ...prev, 
@@ -140,7 +134,7 @@ const App: React.FC = () => {
         messages: [...prev.messages, { 
           id: 'err-' + Date.now(), 
           role: 'model', 
-          text: errorMsg, 
+          text: "O sistema atingiu o limite temporário de requisições do Google. Vamos restabelecer a conexão em instantes.", 
           timestamp: new Date() 
         }]
       }));
@@ -156,7 +150,6 @@ const App: React.FC = () => {
     setLastInput(input);
     const currentInput = input;
     setInput('');
-    
     await performSendMessage(currentInput);
   };
 
@@ -189,15 +182,20 @@ const App: React.FC = () => {
         </div>
         <div className="p-4 flex-1 overflow-y-auto">
           <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <MessageCircle className="w-5 h-5" /> Chat do Consultor
+            <MessageCircle className="w-5 h-5" /> Consultoria Digital
           </button>
           <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <LayoutDashboard className="w-5 h-5" /> Painel CRM
+            <LayoutDashboard className="w-5 h-5" /> Painel de Leads
           </button>
         </div>
-        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center gap-2 shrink-0">
-          <div className={`w-2 h-2 rounded-full ${cooldownSeconds > 0 ? 'bg-amber-500' : hasApiKey ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
-          {cooldownSeconds > 0 ? `IA em Pausa (${cooldownSeconds}s)` : hasApiKey ? 'IA Conectada' : 'API Key Pendente'}
+        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500' : apiStatus === 'reconnecting' ? 'bg-amber-500 animate-pulse' : 'bg-red-500'}`}></div>
+            <span className="font-bold uppercase tracking-tighter">
+              {apiStatus === 'online' ? 'Sistema Online' : apiStatus === 'reconnecting' ? 'Relicon Ativo' : 'Offline'}
+            </span>
+          </div>
+          {cooldownSeconds > 0 && <span className="text-red-500 font-bold">{cooldownSeconds}s</span>}
         </div>
       </aside>
 
@@ -207,7 +205,7 @@ const App: React.FC = () => {
             <Rocket className="text-blue-600 w-5 h-5" />
             <span className="font-bold text-gray-900">Dgital</span>
           </div>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2">
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-500">
             {isSidebarOpen ? <X /> : <Menu />}
           </button>
         </div>
@@ -215,12 +213,6 @@ const App: React.FC = () => {
         {view === 'admin' && admin.isAuthenticated ? <AdminDashboard /> : (
           <div className="flex flex-col h-full overflow-hidden">
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-10 space-y-4 bg-slate-50/50">
-              {!hasApiKey && (
-                <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm mb-4">
-                  <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <span>Configure a variável <b>API_KEY</b> no ambiente para ativar a IA.</span>
-                </div>
-              )}
               {chatState.messages.map(msg => (
                 <ChatMessage 
                   key={msg.id} 
@@ -230,33 +222,30 @@ const App: React.FC = () => {
                 />
               ))}
               {chatState.isThinking && (
-                <div className="flex gap-2 items-center text-blue-400 text-xs font-bold px-4">
-                  <RefreshCw className={`w-4 h-4 ${retryAttempt > 0 ? 'animate-spin' : 'animate-pulse'}`} />
-                  <span>{retryAttempt > 0 ? `Reconectando (Tentativa ${retryAttempt})...` : 'Consultor analisando...'}</span>
+                <div className="flex gap-2 items-center text-blue-500 text-[11px] font-bold px-4">
+                  <RefreshCw className={`w-3.5 h-3.5 ${retryAttempt > 0 ? 'animate-spin' : 'animate-pulse'}`} />
+                  <span>{retryAttempt > 0 ? `RELICON: Tentativa ${retryAttempt}...` : 'Consultor analisando...'}</span>
                 </div>
               )}
             </div>
 
             <div className="p-4 md:p-6 bg-white border-t shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              {cooldownSeconds > 0 && (
-                <div className="mb-3 flex items-center justify-center gap-2 text-amber-600 text-[11px] font-bold uppercase tracking-wider">
-                  <Clock className="w-3.5 h-3.5" />
-                  Respeitando limites da API: {cooldownSeconds}s
-                </div>
-              )}
               <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
-                <input 
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={cooldownSeconds > 0 ? "Aguardando..." : "Como podemos escalar seu negócio?"}
-                  className={`flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm ${cooldownSeconds > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  disabled={chatState.isThinking || cooldownSeconds > 0}
-                />
+                <div className="relative flex-1">
+                  <input 
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={cooldownSeconds > 0 ? `Reconexão em ${cooldownSeconds}s...` : "Como podemos escalar seu negócio?"}
+                    className={`w-full bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm ${cooldownSeconds > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    disabled={chatState.isThinking || cooldownSeconds > 0}
+                  />
+                  {cooldownSeconds > 0 && <Clock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500 animate-pulse" />}
+                </div>
                 <button 
                   type="submit" 
                   disabled={!input.trim() || chatState.isThinking || cooldownSeconds > 0} 
-                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100"
+                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
                 >
                   <Send className="w-5 h-5" />
                 </button>

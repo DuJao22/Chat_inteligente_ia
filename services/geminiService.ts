@@ -2,45 +2,34 @@ import { GoogleGenAI } from "@google/genai";
 import { Message } from "../types";
 
 export const SYSTEM_INSTRUCTION = `
-Você é o consultor de crescimento da "Dgital Soluctions", uma agência sênior de tecnologia e marketing.
-Seu objetivo é vender o ecossistema completo: Tráfego, SaaS, Automações, Design e LPs.
+Você é o consultor de crescimento da "Dgital Soluctions". Venda: Tráfego, SaaS, Automações e LPs.
+Seja consultivo e direto. Sempre retorne sua resposta e o JSON de análise ao final.
 
-ESTRUTURA DE RETORNO OBRIGATÓRIA:
-Sempre retorne sua resposta de chat e, ao final, um bloco JSON entre tags <analysis></analysis> com este formato:
-{
-  "stage": "Abertura|Diagnóstico|Autoridade|Solução|Qualificação|Conversão",
-  "status": "Frio|Morno|Qualificado|Quente",
-  "score": 0-100,
-  "next_step": "string com a próxima ação recomendada",
-  "extracted_data": {
-    "name": "string se descoberto",
-    "email": "string se descoberto",
-    "phone": "string se descoberto",
-    "main_need": "resumo conciso da dor do cliente"
-  }
-}
+FORMATO OBRIGATÓRIO:
+[Sua resposta aqui]
+<analysis>{"stage": "...", "status": "...", "score": 0, "next_step": "...", "extracted_data": {}}</analysis>
 
-REGRAS:
-1. Comece pelo diagnóstico. 2. Seja consultivo. 3. Peça contato para fechar.
-Mantenha as respostas curtas e jamais mostre o JSON para o cliente.
+REGRAS: 1. Diagnóstico primeiro. 2. Peça contato. 3. Respostas curtas.
 `;
 
 /**
  * getGeminiChat - Dgital Soluctions
- * Creates a new chat session with the growth consultant.
- * Following guidelines: obtained exclusively from process.env.API_KEY.
+ * Otimizado para economizar cota de tokens (TPM).
  */
 export const getGeminiChat = (history: Message[] = []) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   
-  // Otimização agressiva de tokens: Mantém apenas as últimas 6 mensagens para evitar erro 429 por excesso de tokens
-  const optimizedHistory = history.slice(-6);
+  // Otimização Relicon: Mantém apenas as últimas 4 mensagens. 
+  // Isso reduz drasticamente o consumo de tokens e evita erros 429.
+  const optimizedHistory = history.slice(-4);
 
   return ai.chats.create({
     model: 'gemini-3-flash-preview',
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.7,
+      topP: 0.8,
+      topK: 40
     },
     history: optimizedHistory.map(m => ({
       role: m.role,
@@ -49,9 +38,6 @@ export const getGeminiChat = (history: Message[] = []) => {
   });
 };
 
-/**
- * parseAnalysis - Extracts the hidden JSON analysis from the model response.
- */
 export const parseAnalysis = (text: string) => {
   const match = text.match(/<analysis>([\s\S]*?)<\/analysis>/);
   if (match) {
@@ -60,7 +46,7 @@ export const parseAnalysis = (text: string) => {
       const analysis = JSON.parse(match[1]);
       return { cleanText, analysis };
     } catch (e) {
-      console.error("Failed to parse analysis JSON", e);
+      console.error("Analysis Parse Fail");
     }
   }
   return { cleanText: text, analysis: null };
