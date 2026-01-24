@@ -13,7 +13,7 @@ const App: React.FC = () => {
   const [admin, setAdmin] = useState<AdminUser>({ isAuthenticated: false, username: null });
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  // Guideline: The API key must be obtained exclusively from process.env.API_KEY
+  // A chave de API deve vir do ambiente via Vite define no config
   const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
   
   const [leadId] = useState<string>(() => `lead_${Math.random().toString(36).substr(2, 9)}`);
@@ -94,9 +94,7 @@ const App: React.FC = () => {
     e?.preventDefault();
     if (!input.trim() || chatState.isThinking) return;
 
-    // Guideline: Exclusively use process.env.API_KEY
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
+    if (!process.env.API_KEY) {
       setHasApiKey(false);
       return;
     } else {
@@ -116,7 +114,14 @@ const App: React.FC = () => {
       handleBotResponse(responseText);
     } catch (err: any) {
       console.error("Chat Error:", err);
-      const errorMsg = `Erro de conexão: ${err.message || "Problema desconhecido"}.`;
+      let errorMsg = "Desculpe, tive um problema na conexão. Pode tentar novamente?";
+      
+      const errString = JSON.stringify(err);
+      if (errString.includes("RESOURCE_EXHAUSTED") || errString.includes("429")) {
+        errorMsg = "Limite de uso da IA atingido para este período. Por favor, aguarde alguns minutos antes de continuar ou verifique sua cota no Google Cloud.";
+      } else if (err.message === 'API_KEY_MISSING') {
+        errorMsg = "Erro: Chave de API (API_KEY) não configurada no ambiente.";
+      }
       
       setChatState(prev => ({ 
         ...prev, 
@@ -175,7 +180,7 @@ const App: React.FC = () => {
               {!hasApiKey && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3 text-amber-700 text-sm mb-4">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <span>Configure a variável <b>API_KEY</b> no ambiente para ativar as respostas da IA.</span>
+                  <span>Configure a variável <b>API_KEY</b> no ambiente do Render para ativar a IA.</span>
                 </div>
               )}
               {chatState.messages.map(msg => <ChatMessage key={msg.id} message={msg} />)}
