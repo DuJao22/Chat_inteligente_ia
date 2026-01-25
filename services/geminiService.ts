@@ -1,30 +1,25 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { Message } from "../types";
+import { LeadService } from "./dbService";
 
-// Agente Dgital Soluctions - Prompt do Sistema
 export const SYSTEM_INSTRUCTION = `Agente Dgital Soluctions. Venda: Tráfego, Automação, SaaS e LP.
 Seja direto e consultivo. 
 Obrigatório: Resposta + <analysis>{"stage":"...","status":"...","score":0,"next_step":"...","extracted_data":{}}</analysis>`;
 
 /**
- * Recupera a melhor chave API disponível.
- * Prioridade: Chave Manual (Painel) > process.env.API_KEY
+ * Recupera a chave API ativa. 
+ * Em uma aplicação real com SQLite Cloud, isso viria de uma tabela de configurações.
  */
-const getActiveApiKey = () => {
-  const manualKey = localStorage.getItem('dgital_custom_api_key');
-  return manualKey || process.env.API_KEY;
+const getActiveApiKey = async () => {
+  const settings = await LeadService.getSettings();
+  return settings.customApiKey || process.env.API_KEY;
 };
 
-/**
- * getGeminiChat - Dgital Soluctions
- * Inicializa o chat utilizando a chave mestre definida.
- */
-export const getGeminiChat = (history: Message[] = []) => {
-  const apiKey = getActiveApiKey();
+export const getGeminiChat = async (history: Message[] = []) => {
+  const apiKey = await getActiveApiKey();
   const ai = new GoogleGenAI({ apiKey: apiKey || '' });
   
-  // Otimização de histórico
   const optimizedHistory = history.slice(-5);
 
   return ai.chats.create({
@@ -41,9 +36,6 @@ export const getGeminiChat = (history: Message[] = []) => {
   });
 };
 
-/**
- * parseAnalysis - Extrai os metadados JSON da resposta da IA
- */
 export const parseAnalysis = (text: string) => {
   const match = text.match(/<analysis>([\s\S]*?)<\/analysis>/);
   if (match) {

@@ -1,20 +1,25 @@
-import { Lead, Message } from '../types';
 
-// O URL agora é obtido exclusivamente via variável de ambiente para segurança.
+import { Lead, Message, SystemSettings } from '../types';
+
 const SQLITE_CLOUD_URL = process.env.SQLITE_CLOUD_URL || '';
 
-/**
- * LeadService - Dgital Soluctions
- * Gerencia a persistência. Em ambiente de produção (Render), os dados são
- * sincronizados via variável de ambiente SQLITE_CLOUD_URL.
- */
 export const LeadService = {
+  // Gerenciamento de Configurações Globais
+  getSettings: async (): Promise<SystemSettings> => {
+    try {
+      const data = localStorage.getItem('dgital_system_settings');
+      return data ? JSON.parse(data) : {};
+    } catch (e) {
+      return {};
+    }
+  },
+
+  updateSettings: async (settings: SystemSettings): Promise<void> => {
+    localStorage.setItem('dgital_system_settings', JSON.stringify(settings));
+  },
+
   saveLead: async (lead: Lead): Promise<void> => {
     try {
-      if (!SQLITE_CLOUD_URL) {
-        console.warn('SQLITE_CLOUD_URL não configurada. Usando armazenamento local temporário.');
-      }
-      
       const allLeads = await LeadService.getAllLeads();
       const leadIndex = allLeads.findIndex(l => l.id === lead.id);
       
@@ -37,8 +42,6 @@ export const LeadService = {
         });
         localStorage.setItem('dgital_db_messages', JSON.stringify(storedMsgs));
       }
-
-      console.info('Dgital Soluctions: Dados sincronizados');
     } catch (error) {
       console.error('Erro ao salvar dados:', error);
     }
@@ -62,14 +65,6 @@ export const LeadService = {
   getLeadById: async (id: string): Promise<Lead | undefined> => {
     const leads = await LeadService.getAllLeads();
     return leads.find(l => l.id === id);
-  },
-
-  deleteLead: async (id: string): Promise<void> => {
-    const leads = (await LeadService.getAllLeads()).filter(l => l.id !== id);
-    const messages = (await LeadService.getRawMessages()).filter((m: any) => m.lead_id !== id);
-    
-    localStorage.setItem('dgital_db_leads', JSON.stringify(leads));
-    localStorage.setItem('dgital_db_messages', JSON.stringify(messages));
   },
 
   getRawMessages: async (): Promise<any[]> => {

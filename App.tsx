@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { FunnelStage, LeadStatus, Message, ChatState, Lead, AdminUser } from './types';
 import { getGeminiChat, parseAnalysis } from './services/geminiService';
@@ -62,7 +63,7 @@ const App: React.FC = () => {
     if (currentRetry > 0) setApiStatus('reconnecting');
 
     try {
-      const chat = getGeminiChat(chatState.messages);
+      const chat = await getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: messageText });
       const responseText = result.text || "Sem resposta.";
       
@@ -93,7 +94,7 @@ const App: React.FC = () => {
     } catch (err: any) {
       const errStr = String(err);
       
-      if ((errStr.includes("429") || errStr.includes("RESOURCES_EXHAUSTED")) && currentRetry < 4) {
+      if ((errStr.includes("429") || errStr.includes("RESOURCES_EXHAUSTED")) && currentRetry < 2) {
         const wait = (currentRetry + 1) * 2000;
         setTimeout(() => performSendMessage(messageText, currentRetry + 1), wait);
         return;
@@ -102,9 +103,9 @@ const App: React.FC = () => {
       setApiStatus('offline');
       setCooldownSeconds(30);
       
-      let friendlyError = "O sistema do Google está sobrecarregado. Por favor, aguarde 30 segundos.";
+      let friendlyError = "O sistema está temporariamente indisponível. Por favor, tente novamente em instantes.";
       if (errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED")) {
-        friendlyError = "Erro de Cota (429): Limite atingido. Administrador: selecione uma chave API de projeto pago no painel de infraestrutura para liberar o sistema.";
+        friendlyError = "Erro de Cota (429): Limite de requisições atingido. O administrador foi notificado para realizar a manutenção da chave.";
       }
 
       setChatState(prev => ({ 
@@ -161,22 +162,19 @@ const App: React.FC = () => {
         <div className="p-4 border-t text-[10px] text-gray-400 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
-            <span className="font-bold uppercase tracking-tighter">{apiStatus === 'online' ? 'Sistema Ativo' : 'Sincronizando'}</span>
+            <span className="font-bold uppercase tracking-tighter">{apiStatus === 'online' ? 'Sistema Online' : 'Sincronizando'}</span>
           </div>
-          {cooldownSeconds > 0 && <span className="text-red-500 font-bold">Bloqueado {cooldownSeconds}s</span>}
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0 bg-white h-full relative">
-        <div className="md:hidden flex items-center justify-between p-4 border-b bg-white shrink-0">
+        <header className="flex items-center justify-between p-4 border-b bg-white shrink-0">
           <div className="flex items-center gap-2">
-            <Rocket className="text-blue-600 w-5 h-5" />
-            <span className="font-bold text-gray-900">Dgital</span>
+            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2"><Menu /></button>
+            <Rocket className="text-blue-600 w-5 h-5 hidden md:block" />
+            <span className="font-bold text-gray-900">Consultoria Dgital AI</span>
           </div>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2">
-            {isSidebarOpen ? <X /> : <Menu />}
-          </button>
-        </div>
+        </header>
 
         {view === 'admin' && admin.isAuthenticated ? <AdminDashboard /> : (
           <div className="flex flex-col h-full overflow-hidden">
@@ -192,7 +190,7 @@ const App: React.FC = () => {
               {chatState.isThinking && (
                 <div className="flex gap-2 items-center text-blue-500 text-[11px] font-bold px-4 animate-pulse">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>{retryAttempt > 0 ? `Tentativa de Conexão ${retryAttempt}...` : 'Consultor analisando seu negócio...'}</span>
+                  <span>Analisando seu negócio...</span>
                 </div>
               )}
             </div>
@@ -203,7 +201,7 @@ const App: React.FC = () => {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={cooldownSeconds > 0 ? `Aguardando desbloqueio (${cooldownSeconds}s)` : "Como podemos escalar seu negócio?"}
+                  placeholder={cooldownSeconds > 0 ? `Aguardando liberação (${cooldownSeconds}s)` : "Fale com nosso consultor..."}
                   className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   disabled={chatState.isThinking || cooldownSeconds > 0}
                 />

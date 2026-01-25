@@ -51,3 +51,7 @@ export interface AdminUser {
   isAuthenticated: boolean;
   username: string | null;
 }
+
+export interface SystemSettings {
+  customApiKey?: string;
+}
