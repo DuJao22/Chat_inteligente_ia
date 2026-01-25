@@ -62,7 +62,7 @@ const App: React.FC = () => {
     try {
       const chat = await getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: messageText });
-      const responseText = result.text || "Desculpe, não consegui processar sua ideia agora.";
+      const responseText = result.text || "Ops, me perdi um pouco aqui. Pode repetir?";
       
       const { cleanText, analysis } = parseAnalysis(responseText);
       const botMsg: Message = { id: Date.now().toString(), role: 'model', text: cleanText, timestamp: new Date() };
@@ -77,7 +77,7 @@ const App: React.FC = () => {
 
       const existing = await LeadService.getLeadById(leadId);
       const updatedLead: Lead = {
-        ...(existing || { id: leadId, name: 'Lead em Atendimento', status: LeadStatus.COLD, stage: FunnelStage.OPENING, score: 0, lastActive: new Date(), messages: [] }),
+        ...(existing || { id: leadId, name: 'Novo Lead', status: LeadStatus.COLD, stage: FunnelStage.OPENING, score: 0, lastActive: new Date(), messages: [] }),
         messages: [...chatState.messages, botMsg],
         lastActive: new Date(),
         status: analysis?.status || existing?.status || LeadStatus.COLD,
@@ -89,11 +89,13 @@ const App: React.FC = () => {
     } catch (err: any) {
       const errStr = String(err);
       setApiStatus('offline');
-      setCooldownSeconds(15);
       
-      let errorMsg = "Tivemos um pequeno problema de conexão. Vou recarregar meus sistemas, tente novamente em 15 segundos.";
+      // Cooldown mais curto para o plano gratuito (5 segundos)
+      setCooldownSeconds(5);
+      
+      let errorMsg = "O sistema está um pouco lento agora. Tente novamente em 5 segundos.";
       if (errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED")) {
-        errorMsg = "Limite de cota atingido temporariamente. Por favor, aguarde alguns segundos enquanto estabilizamos o sistema.";
+        errorMsg = "Limite de cota atingido (Erro 429). Isso acontece na versão gratuita quando o Google limita o uso. Aguarde uns segundos e tente de novo.";
       }
 
       setChatState(prev => ({ 
@@ -124,10 +126,10 @@ const App: React.FC = () => {
   if (view === 'login' && !admin.isAuthenticated) {
     return <AdminLogin onLogin={(u, p) => {
       if (u === 'admin' && p === 'dujao22') {
-        setAdmin({ isAuthenticated: true, username: 'Administrador' });
+        setAdmin({ isAuthenticated: true, username: 'Gestor' });
         setView('admin');
       } else {
-        setLoginError('Credenciais inválidas.');
+        setLoginError('Acesso negado.');
       }
     }} error={loginError} />;
   }
@@ -141,11 +143,11 @@ const App: React.FC = () => {
         </div>
         
         <div className="p-4 flex-1 space-y-2">
-          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all font-bold text-sm ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <MessageCircle className="w-5 h-5" /> Chat Consultor
+          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all font-bold text-sm ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <MessageCircle className="w-5 h-5" /> Iniciar Chat
           </button>
-          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all font-bold text-sm ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <LayoutDashboard className="w-5 h-5" /> Painel Admin
+          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all font-bold text-sm ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <LayoutDashboard className="w-5 h-5" /> Área do Gestor
           </button>
         </div>
       </aside>
@@ -155,13 +157,13 @@ const App: React.FC = () => {
           <div className="flex items-center gap-3">
             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 hover:bg-gray-100 rounded-xl"><Menu className="w-6 h-6" /></button>
             <h2 className="font-bold text-gray-800 text-lg md:text-xl">
-              {view === 'admin' ? 'Controle CRM' : 'Consultoria Inteligente'}
+              {view === 'admin' ? 'Painel CRM' : 'Consultor Digital'}
             </h2>
           </div>
         </header>
 
         {view === 'admin' && admin.isAuthenticated ? <AdminDashboard /> : (
-          <div className="flex flex-col h-full bg-slate-50/30">
+          <div className="flex flex-col h-full bg-slate-50/20">
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
               {chatState.messages.map(msg => (
                 <ChatMessage 
@@ -172,9 +174,9 @@ const App: React.FC = () => {
                 />
               ))}
               {chatState.isThinking && (
-                <div className="flex gap-3 items-center text-blue-600 text-xs font-bold px-6 py-4 bg-white rounded-2xl border border-blue-50 w-fit animate-pulse">
+                <div className="flex gap-3 items-center text-blue-600 text-xs font-bold px-6 py-4 bg-white rounded-2xl border border-blue-50 w-fit animate-pulse shadow-sm">
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>DGITAL AI está pensando...</span>
+                  <span>Sintonizando IA...</span>
                 </div>
               )}
             </div>
@@ -185,14 +187,14 @@ const App: React.FC = () => {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={cooldownSeconds > 0 ? `Aguarde ${cooldownSeconds}s...` : "Qual sua dúvida sobre tráfego ou tecnologia?"}
-                  className="flex-1 bg-gray-50 border-2 border-transparent focus:border-blue-500 rounded-2xl py-4 px-6 outline-none transition-all text-sm"
+                  placeholder={cooldownSeconds > 0 ? `Aguarde ${cooldownSeconds}s...` : "Como posso ajudar seu negócio hoje?"}
+                  className="flex-1 bg-gray-50 border-2 border-transparent focus:border-blue-500 rounded-2xl py-4 px-6 outline-none transition-all text-sm shadow-inner"
                   disabled={chatState.isThinking || cooldownSeconds > 0}
                 />
                 <button 
                   type="submit" 
                   disabled={!input.trim() || chatState.isThinking || cooldownSeconds > 0} 
-                  className="bg-blue-600 text-white p-4 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95"
+                  className="bg-blue-600 text-white p-4 rounded-2xl disabled:opacity-50 hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-200"
                 >
                   <Send className="w-6 h-6" />
                 </button>
