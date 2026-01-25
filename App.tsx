@@ -6,7 +6,7 @@ import { LeadService } from './services/dbService';
 import ChatMessage from './components/ChatMessage';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
-import { Send, Rocket, LayoutDashboard, MessageCircle, Menu, X, RefreshCw } from 'lucide-react';
+import { Send, Rocket, LayoutDashboard, MessageCircle, Menu, X, RefreshCw, AlertTriangle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'chat' | 'admin' | 'login'>('chat');
@@ -14,8 +14,7 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
-  const [retryAttempt, setRetryAttempt] = useState(0);
-  const [apiStatus, setApiStatus] = useState<'online' | 'reconnecting' | 'offline'>('online');
+  const [apiStatus, setApiStatus] = useState<'online' | 'offline'>('online');
   
   const [leadId] = useState<string>(() => `lead_${Math.random().toString(36).substr(2, 9)}`);
   const [chatState, setChatState] = useState<ChatState>({
@@ -34,7 +33,7 @@ const App: React.FC = () => {
     if (cooldownSeconds > 0) {
       const timer = setTimeout(() => setCooldownSeconds(prev => prev - 1), 1000);
       return () => clearTimeout(timer);
-    } else if (cooldownSeconds === 0 && apiStatus === 'offline') {
+    } else {
       setApiStatus('online');
     }
   }, [cooldownSeconds]);
@@ -44,7 +43,7 @@ const App: React.FC = () => {
       const botMsg: Message = { 
         id: 'init', 
         role: 'model', 
-        text: "Olá! Bem-vindo à Dgital Soluctions. Como posso ajudar seu negócio a escalar hoje?", 
+        text: "Olá! Sou o consultor virtual da Dgital Soluctions. Como posso ajudar sua empresa a crescer com tecnologia e marketing?", 
         timestamp: new Date() 
       };
       setChatState(prev => ({ ...prev, messages: [botMsg] }));
@@ -57,15 +56,13 @@ const App: React.FC = () => {
     }
   }, [chatState.messages, chatState.isThinking]);
 
-  const performSendMessage = async (messageText: string, currentRetry = 0) => {
+  const performSendMessage = async (messageText: string) => {
     setChatState(prev => ({ ...prev, isThinking: true }));
-    setRetryAttempt(currentRetry);
-    if (currentRetry > 0) setApiStatus('reconnecting');
 
     try {
       const chat = await getGeminiChat(chatState.messages);
       const result = await chat.sendMessage({ message: messageText });
-      const responseText = result.text || "Sem resposta.";
+      const responseText = result.text || "Estou com dificuldades para processar sua mensagem.";
       
       const { cleanText, analysis } = parseAnalysis(responseText);
       const botMsg: Message = { id: Date.now().toString(), role: 'model', text: cleanText, timestamp: new Date() };
@@ -77,12 +74,10 @@ const App: React.FC = () => {
         currentStage: (analysis?.stage as FunnelStage) || prev.currentStage,
         leadStatus: (analysis?.status as LeadStatus) || prev.leadStatus,
       }));
-      setApiStatus('online');
-      setRetryAttempt(0);
 
       const existing = await LeadService.getLeadById(leadId);
       const updatedLead: Lead = {
-        ...(existing || { id: leadId, name: 'Lead', status: LeadStatus.COLD, stage: FunnelStage.OPENING, score: 0, lastActive: new Date(), messages: [] }),
+        ...(existing || { id: leadId, name: 'Lead em Atendimento', status: LeadStatus.COLD, stage: FunnelStage.OPENING, score: 0, lastActive: new Date(), messages: [] }),
         messages: [...chatState.messages, botMsg],
         lastActive: new Date(),
         status: analysis?.status || existing?.status || LeadStatus.COLD,
@@ -93,19 +88,12 @@ const App: React.FC = () => {
 
     } catch (err: any) {
       const errStr = String(err);
-      
-      if ((errStr.includes("429") || errStr.includes("RESOURCES_EXHAUSTED")) && currentRetry < 2) {
-        const wait = (currentRetry + 1) * 2000;
-        setTimeout(() => performSendMessage(messageText, currentRetry + 1), wait);
-        return;
-      }
-
       setApiStatus('offline');
       setCooldownSeconds(30);
       
-      let friendlyError = "O sistema está temporariamente indisponível. Por favor, tente novamente em instantes.";
+      let errorMsg = "Ocorreu um erro técnico. Por favor, tente novamente em 30 segundos.";
       if (errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED")) {
-        friendlyError = "Erro de Cota (429): Limite de requisições atingido. O administrador foi notificado para realizar a manutenção da chave.";
+        errorMsg = "ALERTA DE COTA: Nosso servidor de IA atingiu o limite de requisições gratuitas do Google. O administrador precisa atualizar a Chave API para o plano pago (Pay-as-you-go) no painel de controle.";
       }
 
       setChatState(prev => ({ 
@@ -114,7 +102,7 @@ const App: React.FC = () => {
         messages: [...prev.messages, { 
           id: 'err-' + Date.now(), 
           role: 'model', 
-          text: friendlyError, 
+          text: errorMsg, 
           timestamp: new Date() 
         }]
       }));
@@ -136,49 +124,67 @@ const App: React.FC = () => {
   if (view === 'login' && !admin.isAuthenticated) {
     return <AdminLogin onLogin={(u, p) => {
       if (u === 'admin' && p === 'dujao22') {
-        setAdmin({ isAuthenticated: true, username: 'Gestor' });
+        setAdmin({ isAuthenticated: true, username: 'Administrador' });
         setView('admin');
       } else {
-        setLoginError('Acesso negado.');
+        setLoginError('Credenciais inválidas.');
       }
     }} error={loginError} />;
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] w-full overflow-hidden bg-slate-50">
+    <div className="flex flex-col md:flex-row h-[100dvh] w-full overflow-hidden bg-slate-100">
+      {/* Sidebar Mobile/Desktop */}
       <aside className={`fixed inset-y-0 left-0 w-80 bg-white border-r flex flex-col z-50 transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 border-b flex items-center gap-3">
-          <Rocket className="text-blue-600 w-6 h-6" />
-          <h1 className="font-bold text-gray-900">Dgital Soluctions</h1>
+        <div className="p-8 border-b flex items-center gap-4 bg-slate-50/50">
+          <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
+             <Rocket className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="font-bold text-gray-900 tracking-tight">Dgital Soluctions</h1>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Consultoria AI</p>
+          </div>
         </div>
-        <div className="p-4 flex-1">
-          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'chat' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'}`}>
+        
+        <div className="p-4 flex-1 space-y-2">
+          <button onClick={() => { setView('chat'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all font-bold text-sm ${view === 'chat' ? 'bg-blue-600 text-white shadow-xl shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
             <MessageCircle className="w-5 h-5" /> Chat Consultor
           </button>
-          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-2 transition-all ${view === 'admin' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-50'}`}>
-            <LayoutDashboard className="w-5 h-5" /> Painel Admin
+          <button onClick={() => { setView(admin.isAuthenticated ? 'admin' : 'login'); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all font-bold text-sm ${view === 'admin' ? 'bg-blue-600 text-white shadow-xl shadow-blue-100' : 'text-gray-500 hover:bg-gray-50'}`}>
+            <LayoutDashboard className="w-5 h-5" /> Gestão de Leads
           </button>
         </div>
-        <div className="p-4 border-t text-[10px] text-gray-400 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
-            <span className="font-bold uppercase tracking-tighter">{apiStatus === 'online' ? 'Sistema Online' : 'Sincronizando'}</span>
-          </div>
+
+        <div className="p-6 border-t flex flex-col gap-2">
+           <div className={`p-4 rounded-2xl flex items-center gap-3 border ${apiStatus === 'online' ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+              <div className={`w-2 h-2 rounded-full ${apiStatus === 'online' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${apiStatus === 'online' ? 'text-green-700' : 'text-red-700'}`}>
+                {apiStatus === 'online' ? 'Sistemas Prontos' : 'Aguardando Cota'}
+              </span>
+           </div>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-white h-full relative">
-        <header className="flex items-center justify-between p-4 border-b bg-white shrink-0">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2"><Menu /></button>
-            <Rocket className="text-blue-600 w-5 h-5 hidden md:block" />
-            <span className="font-bold text-gray-900">Consultoria Dgital AI</span>
+      {/* Main View */}
+      <main className="flex-1 flex flex-col min-w-0 bg-white relative">
+        <header className="flex items-center justify-between p-4 md:p-6 border-b bg-white shrink-0">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 hover:bg-gray-100 rounded-xl"><Menu className="w-6 h-6" /></button>
+            <h2 className="font-bold text-gray-800 text-lg md:text-xl">
+              {view === 'admin' ? 'Painel de Controle' : 'Consultoria Estratégica'}
+            </h2>
           </div>
+          {view === 'chat' && cooldownSeconds > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-full border border-amber-100 animate-pulse">
+               <AlertTriangle className="w-4 h-4" />
+               <span className="text-[10px] font-bold uppercase">Aguardando Cota ({cooldownSeconds}s)</span>
+            </div>
+          )}
         </header>
 
         {view === 'admin' && admin.isAuthenticated ? <AdminDashboard /> : (
-          <div className="flex flex-col h-full overflow-hidden">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-10 space-y-4 bg-slate-50/50">
+          <div className="flex flex-col h-full bg-slate-50/50">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
               {chatState.messages.map(msg => (
                 <ChatMessage 
                   key={msg.id} 
@@ -188,31 +194,32 @@ const App: React.FC = () => {
                 />
               ))}
               {chatState.isThinking && (
-                <div className="flex gap-2 items-center text-blue-500 text-[11px] font-bold px-4 animate-pulse">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Analisando seu negócio...</span>
+                <div className="flex gap-3 items-center text-blue-600 text-xs font-bold px-6 py-4 bg-white/80 rounded-2xl border border-blue-50 w-fit animate-pulse">
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>DGITAL AI: Analisando seu perfil comercial...</span>
                 </div>
               )}
             </div>
 
-            <div className="p-4 md:p-6 bg-white border-t shrink-0">
-              <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
+            <div className="p-4 md:p-8 bg-white border-t">
+              <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto flex gap-3">
                 <input 
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={cooldownSeconds > 0 ? `Aguardando liberação (${cooldownSeconds}s)` : "Fale com nosso consultor..."}
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-2xl py-3 px-4 outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  placeholder={cooldownSeconds > 0 ? "O sistema está descansando (Cota API)..." : "Explique sua necessidade (Ex: Quero mais leads qualificados)"}
+                  className="flex-1 bg-gray-50 border-2 border-transparent focus:border-blue-500 rounded-[1.5rem] py-4 px-6 outline-none transition-all text-sm shadow-inner"
                   disabled={chatState.isThinking || cooldownSeconds > 0}
                 />
                 <button 
                   type="submit" 
                   disabled={!input.trim() || chatState.isThinking || cooldownSeconds > 0} 
-                  className="bg-blue-600 text-white p-3 rounded-2xl disabled:opacity-50 hover:bg-blue-700 shadow-lg transition-all"
+                  className="bg-blue-600 text-white p-4 rounded-2xl disabled:opacity-50 hover:bg-blue-700 shadow-xl shadow-blue-200 transition-all active:scale-90"
                 >
-                  <Send className="w-5 h-5" />
+                  <Send className="w-6 h-6" />
                 </button>
               </form>
+              <p className="text-center text-[9px] text-gray-400 mt-4 uppercase font-bold tracking-widest">Inteligência Artificial por Dgital Soluctions</p>
             </div>
           </div>
         )}

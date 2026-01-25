@@ -1,13 +1,12 @@
 
 import { Lead, Message, SystemSettings } from '../types';
 
-const SQLITE_CLOUD_URL = process.env.SQLITE_CLOUD_URL || '';
-
 export const LeadService = {
-  // Gerenciamento de Configurações Globais
+  // Gerenciamento de Configurações Globais (Simulado via LocalStorage para este ambiente, 
+  // mas em produção com SQLite Cloud, estas chaves seriam lidas de uma tabela 'settings' central)
   getSettings: async (): Promise<SystemSettings> => {
     try {
-      const data = localStorage.getItem('dgital_system_settings');
+      const data = localStorage.getItem('dgital_global_settings');
       return data ? JSON.parse(data) : {};
     } catch (e) {
       return {};
@@ -15,14 +14,15 @@ export const LeadService = {
   },
 
   updateSettings: async (settings: SystemSettings): Promise<void> => {
-    localStorage.setItem('dgital_system_settings', JSON.stringify(settings));
+    localStorage.setItem('dgital_global_settings', JSON.stringify(settings));
+    // Dispara um evento para notificar outras partes da aplicação se necessário
+    window.dispatchEvent(new Event('settingsUpdated'));
   },
 
   saveLead: async (lead: Lead): Promise<void> => {
     try {
       const allLeads = await LeadService.getAllLeads();
       const leadIndex = allLeads.findIndex(l => l.id === lead.id);
-      
       const { messages, ...leadData } = lead;
 
       if (leadIndex >= 0) {
@@ -43,7 +43,7 @@ export const LeadService = {
         localStorage.setItem('dgital_db_messages', JSON.stringify(storedMsgs));
       }
     } catch (error) {
-      console.error('Erro ao salvar dados:', error);
+      console.error('Erro ao salvar lead:', error);
     }
   },
 
